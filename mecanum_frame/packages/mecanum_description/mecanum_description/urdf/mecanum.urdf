@@ -1,0 +1,405 @@
+<?xml version='1.0'?>
+
+<robot name="mecanum" xmlns:xacro="http://www.ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema">
+
+  <!-- STEP 5 - Gazebo plugin -->
+  <xacro:include filename="$(find mecanum_description)/urdf/mecanum.gazebo" />
+
+  <!-- STEP 4 - RViz colors -->
+  <xacro:include filename="$(find mecanum_description)/urdf/mecanum_materials.xacro" />
+
+  <!-- Constants for robot dimensions -->
+  <xacro:property name="PI" value="3.1415926535897931"/>
+
+  <!-- arbitrary value for chassis value -->
+  <xacro:property name="chassis_mass" value="2.0" />
+  <xacro:property name="chassis_length" value="0.285" />
+  <xacro:property name="chassis_width" value="0.155" />
+  <xacro:property name="chassis_height" value="0.055" />
+  <xacro:property name="chassis_z_offset" value="0.021" />
+  <xacro:property name="chassis_from_wheel_offset" value="0.025" />
+
+
+  <!-- arbitrary value for wheel value -->   
+  <xacro:property name="wheel_mass" value="0.5" /> 
+  <xacro:property name="wheel_len" value="0.04" />
+  <xacro:property name="wheel_radius" value="0.041" />
+
+  <xacro:property name="wheel_front_pos" value="0.095" />
+  <xacro:property name="wheel_rear_pos" value="0.095" />
+
+  <xacro:property name="wheel_dynamic_damping" value="30.0" />
+  <xacro:property name="wheel_dynamic_friction" value="1.0" />
+  <xacro:property name="wheel_limit_effort" value="1000.0" />
+  <xacro:property name="wheel_limit_velocity" value="5.0" />
+
+  <!-- Space btw top of beam and the each joint -->
+  <xacro:property name="z_offset" value="${chassis_height/2}" /> 
+
+  <!-- arbitrary value for chassis layer value -->
+  <xacro:property name="chassis_layer_length" value="${chassis_length/2}" />
+  <xacro:property name="chassis_layer_width" value="${chassis_width}" />
+  <xacro:property name="chassis_layer_height" value="${chassis_height}" />
+
+  <!-- STEP 1 - Robot footprint -->
+  <link name="base_footprint"></link>
+
+  <!-- STEP 2 - Robot chassis = base_link -->
+  <joint name="base_footprint_joint" type="fixed">
+    <!-- <origin xyz="0 0 ${chassis_z_offset + 2*z_offset}" rpy="0 0 0" /> -->
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="base_footprint"/>
+    <child link="base_link" />
+  </joint>
+
+  <link name='base_link'>
+    <pose>0 0 0 0 0 0</pose>
+
+    <inertial>
+      <mass value="${chassis_mass}"/>
+      <origin xyz="0.0 0 0" rpy=" 0 0 0"/>
+      <inertia
+          ixx="${chassis_mass / 12.0 * (chassis_length*chassis_length + chassis_height*chassis_height)}" ixy="0.0" ixz="0.0"
+          iyy="${chassis_mass / 12.0 * (chassis_height*chassis_height + chassis_width*chassis_width)}" iyz="0.0"
+          izz="${chassis_mass / 12.0 * (chassis_width*chassis_width + chassis_length*chassis_length)}"/>
+      />
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy=" 0 0 0"/> 
+      <geometry>
+        <!-- <box size=".4 .2 .1"/> -->
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+    </collision>
+
+    <visual name='base_link_visual'>
+      <origin xyz="0 0 0" rpy=" 0 0 0"/>
+        <geometry>
+            <!-- <box size=".4 .2 .1"/> -->
+           <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+        <!-- <mesh filename = "package://mecanum_description/meshes/mogi_bot.dae"/> -->
+        </geometry>
+      <material name="black"/>
+    </visual>
+
+  </link>
+
+  <joint name="base_layer_joint" type="fixed">
+    <origin xyz="${chassis_length/4} 0 ${chassis_height}"/>
+    <parent link="base_link"/>
+    <child link="base_layer_link" />
+  </joint>
+
+  <link name='base_layer_link'>
+    <pose>0 0 0 0 0 0</pose>
+
+    <inertial>
+      <mass value="${chassis_mass}"/>
+      <origin xyz="0.0 0 0" rpy=" 0 0 0"/>
+      <inertia
+        ixx="${chassis_mass / 12.0 * (chassis_length*chassis_length + chassis_height*chassis_height)}" ixy="0.0" ixz="0.0"
+        iyy="${chassis_mass / 12.0 * (chassis_height*chassis_height + chassis_width*chassis_width)}" iyz="0.0"
+        izz="${chassis_mass / 12.0 * (chassis_width*chassis_width + chassis_length*chassis_length)}"/>
+      />
+    </inertial>
+
+    <collision>
+      <origin xyz="0 0 0" rpy=" 0 0 0"/> 
+      <geometry>
+        <!-- <box size=".4 .2 .1"/> -->
+          <box size="${chassis_layer_length} ${chassis_layer_width} ${chassis_layer_height/2}"/>
+      </geometry>
+    </collision>
+
+    <visual name='base_layer_link_visual'>
+      <origin xyz="0 0 0" rpy=" 0 0 0"/>
+        <geometry>
+            <!-- <box size=".4 .2 .1"/> -->
+          <box size="${chassis_layer_length} ${chassis_layer_width} ${chassis_layer_height}"/>
+        <!-- <mesh filename = "package://mecanum_description/meshes/mogi_bot.dae"/> -->
+        </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <!-- STEP 10 - IMU -->
+<joint name="imu_joint" type="fixed">
+    <origin xyz="0 0 ${chassis_height}"/>
+    <parent link="base_link"/>
+    <child link="imu_link" />
+  </joint>
+
+  <link name='imu_link'>
+    <pose>0 0 0 0 0 0</pose>
+
+    <visual name='imu_link_visual'>
+      <origin xyz="0 0 0" rpy=" 0 0 0"/>
+        <geometry>
+            <!-- <box size=".4 .2 .1"/> -->
+          <box size="0.03 0.03 0.015"/>
+        <!-- <mesh filename = "package://mecanum_description/meshes/mogi_bot.dae"/> -->
+        </geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+
+
+
+  <!-- STEP 10 - Lidar -->
+  <joint type="fixed" name="scan_joint">
+    <origin xyz="0.0 0 0.05" rpy="0 0 3.14159"/>
+    <child link="scan_link"/>
+    <parent link="base_layer_link"/>
+    <axis xyz="0 1 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name='scan_link'>
+    <inertial>
+      <mass value="1e-5"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+          ixx="1e-6" ixy="0" ixz="0"
+          iyy="1e-6" iyz="0"
+          izz="1e-6"
+      />
+    </inertial>
+    <collision name='collision'>
+      <origin xyz="0 0 0" rpy="0 0 0"/> 
+      <geometry>
+        <box size=".05 .05 .05"/>
+        <!-- <cylinder length="0.05" radius="0.03"/> -->
+      </geometry>
+    </collision>
+
+    <visual name='scan_link_visual'>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- <box size=".05 .05 .05"/> -->
+        <cylinder length="0.05" radius="0.03"/>
+        <!-- <mesh filename = "package://mecanum_description/meshes/lidar.dae"/> -->
+      </geometry>
+      <material name="red"/>
+    </visual>
+
+  </link>
+
+  <gazebo reference="scan_link">
+    <selfCollide>false</selfCollide>
+    <mu1 value="0.05" />
+    <mu2 value="0.05" />
+  </gazebo>
+
+  <!-- STEP 3 - Wheels -->
+  <joint type="continuous" name="front_left_wheel_joint">
+    <!-- <origin xyz="0.15 0.15 0" rpy="-1.5707 0 0"/> -->
+    <origin xyz="${wheel_front_pos} ${chassis_width/2 + wheel_len/2 + chassis_from_wheel_offset} ${chassis_z_offset-wheel_radius}" rpy="-${PI/2} 0 0"/>
+    <child link="front_left_wheel"/>
+    <parent link="base_link"/>
+    <axis xyz="0 0 1" rpy="0 0 0"/>
+    <limit effort="${wheel_limit_effort}" velocity="${wheel_limit_velocity}"/>
+    <dynamics damping="${wheel_dynamic_damping}" friction="${wheel_dynamic_friction}"/>
+  </joint>
+
+  <link name='front_left_wheel'>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+          ixx="0.145833" ixy="0" ixz="0"
+          iyy="0.145833" iyz="0"
+          izz="0.125"
+      />
+    </inertial>
+
+    <collision>
+      <geometry>
+        <sphere radius=".1"/>
+      </geometry>
+    </collision>
+
+    <visual name='front_left_wheel_visual'>
+      <origin xyz="0 0 0" rpy="1.5707 0 0"/>
+      <geometry>
+        <!-- <sphere radius=".1"/> -->
+        <mesh filename="package://mecanum_description/meshes/mecanum_wheel_left.STL" scale="0.0008 .0008 0.0008"/>
+      </geometry>
+      <material name="green"/>
+    </visual>
+  </link>
+
+  <joint type="continuous" name="rear_left_wheel_joint">
+   <!-- <origin xyz="0.15 0.15 0" rpy="-1.5707 0 0"/> -->
+    <origin xyz="-${wheel_rear_pos} ${chassis_width/2 + wheel_len/2 + chassis_from_wheel_offset} ${chassis_z_offset-wheel_radius}" rpy="-${PI/2} 0 0"/>
+    <child link="rear_left_wheel"/>
+    <parent link="base_link"/>
+    <axis xyz="0 0 1" rpy="0 0 0"/>
+    <limit effort="${wheel_limit_effort}" velocity="${wheel_limit_velocity}"/>
+    <dynamics damping="${wheel_dynamic_damping}" friction="${wheel_dynamic_friction}"/>
+  </joint>
+
+  <link name='rear_left_wheel'>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+          ixx="0.145833" ixy="0" ixz="0"
+          iyy="0.145833" iyz="0"
+          izz="0.125"
+      />
+    </inertial>
+
+    <collision>
+      <geometry>
+        <sphere radius=".1"/>
+      </geometry>
+    </collision>
+
+    <visual name='rear_left_wheel_visual'>
+      <origin xyz="0 0 0" rpy="1.5707 0 0"/>
+      <geometry>
+        <!-- <sphere radius=".1"/> -->
+        <mesh filename="package://mecanum_description/meshes/mecanum_wheel_right.STL" scale="0.0008 .0008 0.0008"/>
+      </geometry>
+      <material name="green"/>
+    </visual>
+  </link>
+
+  <joint type="continuous" name="front_right_wheel_joint">
+    <!-- <origin xyz="0.15 -0.15 0" rpy="-1.5707 0 0"/> -->
+    <origin xyz="${wheel_front_pos} -${chassis_width/2 + wheel_len/2 + chassis_from_wheel_offset} ${chassis_z_offset-wheel_radius}" rpy="-${PI/2} 0 0"/>
+    <child link="front_right_wheel"/>
+    <parent link="base_link"/>
+    <axis xyz="0 0 1" rpy="0 0 0"/>
+    <limit effort="${wheel_limit_effort}" velocity="${wheel_limit_velocity}"/>
+    <dynamics damping="${wheel_dynamic_damping}" friction="${wheel_dynamic_friction}"/>
+  </joint>
+
+  <link name='front_right_wheel'>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+          ixx="0.145833" ixy="0" ixz="0"
+          iyy="0.145833" iyz="0"
+          izz="0.125"
+      />
+    </inertial>
+
+    <collision>
+      <geometry>
+        <sphere radius=".1"/>
+      </geometry>
+    </collision>
+
+    <visual name='front_right_wheel_visual'>
+      <origin xyz="0 0 0" rpy="1.5707 0 0"/>
+      <geometry>
+        <!-- <sphere radius=".1"/> -->
+        <mesh filename="package://mecanum_description/meshes/mecanum_wheel_left.STL" scale="0.0008 .0008 0.0008"/>
+      </geometry>
+      <material name="green"/>
+    </visual>
+  </link>
+
+  <joint type="continuous" name="rear_right_wheel_joint">
+   <!-- <origin xyz="0.15 -0.15 0" rpy="-1.5707 0 0"/> -->
+    <origin xyz="-${wheel_rear_pos} -${chassis_width/2 + wheel_len/2 + chassis_from_wheel_offset} ${chassis_z_offset-wheel_radius}" rpy="-${PI/2} 0 0"/>
+    <child link="rear_right_wheel"/>
+    <parent link="base_link"/>
+    <axis xyz="0 0 1" rpy="0 0 0"/>
+    <limit effort="${wheel_limit_effort}" velocity="${wheel_limit_velocity}"/>
+    <dynamics damping="${wheel_dynamic_damping}" friction="${wheel_dynamic_friction}"/>
+  </joint>
+
+  <link name='rear_right_wheel'>
+    <inertial>
+      <mass value="2.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+          ixx="0.145833" ixy="0" ixz="0"
+          iyy="0.145833" iyz="0"
+          izz="0.125"
+      />
+    </inertial>
+
+    <collision>
+      <geometry>
+        <sphere radius=".1"/>
+      </geometry>
+    </collision>
+
+    <visual name='rear_right_wheel_visual'>
+      <origin xyz="0 0 0" rpy="1.5707 0 0"/>
+      <geometry>
+        <!-- <sphere radius=".1"/> -->
+        <mesh filename="package://mecanum_description/meshes/mecanum_wheel_left.STL" scale="0.0008 .0008 0.0008"/>
+      </geometry>
+      <material name="green"/>
+    </visual>
+  </link>
+
+  <!-- STEP 6 - Gazebo frictions and colors -->
+  <gazebo reference='front_left_wheel'>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.5</mu>
+            <mu2>0.0</mu2>
+            <fdir1 gz:expressed_in="base_footprint">1 -1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+  </gazebo>
+
+  <gazebo reference='rear_left_wheel'>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.5</mu>
+            <mu2>0.0</mu2>
+            <fdir1 gz:expressed_in="base_footprint">1 1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+  </gazebo>
+
+  <gazebo reference='front_right_wheel'>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.5</mu>
+            <mu2>0.0</mu2>
+            <fdir1 gz:expressed_in="base_footprint">1 1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+  </gazebo>
+
+  <gazebo reference='rear_right_wheel'>
+    <collision>
+      <surface>
+        <friction>
+          <ode>
+            <mu>1.5</mu>
+            <mu2>0.0</mu2>
+            <fdir1 gz:expressed_in="base_footprint">1 -1 0</fdir1>
+          </ode>
+        </friction>
+      </surface>
+    </collision>
+  </gazebo>
+
+  <gazebo reference="base_link">
+    <mu1>0.000002</mu1>
+    <mu2>0.000002</mu2>
+    <!-- <material>Gazebo/Red</material> -->
+  </gazebo>
+
+</robot>

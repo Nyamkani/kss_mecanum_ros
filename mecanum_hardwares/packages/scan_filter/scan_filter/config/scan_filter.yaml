@@ -1,0 +1,20 @@
+scan_filter_chain:
+  ros__parameters:
+    filters:
+      - name: range_filter
+        type: laser_filters/LaserScanRangeFilter
+        params:
+          lower_threshold: "0.15"
+          upper_threshold: "16.0"
+          lower_replacement_value: ".inf"
+          upper_replacement_value: ".inf"
+
+      - name: shadow_filter
+        type: laser_filters/ScanShadowsFilter
+        params:
+          min_angle: "10.0"
+          max_angle: "170.0"
+          neighbors: "1"
+          window: "1"
+          max_range: "1.0"
+          remove_shadow_start_point: "true"
