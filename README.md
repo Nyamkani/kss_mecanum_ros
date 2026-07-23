@@ -4,6 +4,15 @@ Raspberry Pi 5와 Arduino 기반으로 제작한 ROS 2 매카넘 모바일 로�
 
 이 프로젝트의 중심은 SLAM이나 경로 계획 알고리즘 자체의 개발보다는, **하드웨어 인터페이스 구성과 ROS 2 래핑, 좌표계 구성, 그리고 전체 내비게이션 스택의 시스템 통합**에 있습니다.
 
+<p align="center">
+  <img src="./docs/images/mecanum.jpg" alt="KSS mecanum mobile robot" width="850">
+</p>
+
+<p align="center">
+  직접 조립하고 ROS 2 시스템을 통합한 매카넘 모바일 로봇<br>
+  Mecanum mobile robot assembled and integrated with ROS 2
+</p>
+
 ## 개발 환경
 
 | 항목 | 내용 |
@@ -74,6 +83,15 @@ flowchart TD
 - 매카넘 구동을 위해 DWB local planner의 x/y/회전 속도 및 가감속 파라미터를 조정했습니다.
 - 실제 로봇에서 LiDAR 기반 지도 생성과 Nav2 주행 동작을 확인했습니다.
 
+<p align="center">
+  <img src="./docs/images/rviz_slam.png" alt="RViz2 SLAM mode result" width="760">
+</p>
+
+<p align="center">
+  RViz2에서 확인한 SLAM 모드 실행 결과 — 아래 실제 주행 GIF와는 별도의 실행 장면<br>
+  RViz2 SLAM-mode result — captured in a separate session from the driving GIF below
+</p>
+
 ## 주요 패키지
 
 | 경로 | 역할 |
@@ -139,10 +157,31 @@ ros2 launch mecanum_bringup mecanum.gazebo.launch.py
 
 ## 검증 결과
 
+<p align="center">
+  <img src="./docs/images/mecanum_driving.gif" alt="Physical mecanum robot driving in SLAM mode" width="360">
+</p>
+
+<p align="center">
+  SLAM 모드에서 실제 매카넘 로봇 주행 검증<br>
+  Physical mecanum robot driving validation in SLAM mode
+</p>
+
 - 상용 하드웨어를 조립해 Raspberry Pi 5, Arduino, 모터, IMU 및 LiDAR 시스템을 구성했습니다.
 - 실제 로봇에서 UART 기반 모터 명령 및 encoder/RPM feedback을 확인했습니다.
 - ROS 2 토픽, odometry 및 TF 연결을 확인했습니다.
 - SLAM 모드에서 실제 지도 생성과 매카넘 로봇의 Nav2 주행을 확인했습니다.
+
+## 다음 목표 — v1.1
+
+현재 버전에서 실제 로봇의 SLAM 주행까지 확인했으며, v1.1에서는 위치 추정 구조를 정리하고 정확도를 개선하는 데 초점을 둡니다.
+
+- 매카넘 휠의 encoder 데이터를 사용하는 wheel odometry 계산 구조를 정리합니다.
+- IMU의 yaw 및 angular velocity(gyro) 데이터를 위치 추정에 사용합니다.
+- encoder odometry와 IMU를 융합하는 데이터 흐름, 좌표계 및 오차 모델을 설계합니다.
+- 자체 EKF 기반 state estimation을 구현하거나 `robot_localization`과 구조 및 결과를 비교합니다.
+- `/odom`, `/tf`, `/robot_pose`의 추정값과 발행 구조를 개선합니다.
+
+> 기존 버전에도 `robot_localization` 설정과 wheel odometry–IMU 연동이 포함되어 있습니다. v1.1의 목표는 이 구성을 기준으로 입력 데이터와 좌표계를 다시 검토하고, 자체 EKF 구현 가능성 및 추정 결과를 비교·검증하는 것입니다.
 
 ## 프로젝트 범위와 한계
 
@@ -300,6 +339,18 @@ The `mecanum_navigation/packages` directory contains example launch and configur
 - Verified UART motor commands and encoder/RPM feedback on the robot.
 - Verified ROS 2 topics, odometry, and TF connectivity.
 - Verified real-world map generation and mecanum robot motion with Nav2 in SLAM mode.
+
+## Next Goals — v1.1
+
+The current version has been validated through real-robot SLAM operation. Version 1.1 will focus on organizing the state-estimation architecture and improving pose accuracy.
+
+- Refine the wheel-odometry calculation based on mecanum-wheel encoder data.
+- Use IMU yaw and angular-velocity (gyro) data in pose estimation.
+- Design the data flow, coordinate frames, and error model for fusing encoder odometry with IMU measurements.
+- Implement an EKF-based state estimator or compare a custom EKF with `robot_localization` in terms of architecture and estimation results.
+- Improve the estimated values and publication structure of `/odom`, `/tf`, and `/robot_pose`.
+
+> The current version already contains `robot_localization` configuration and wheel-odometry/IMU integration. The v1.1 goal is to review its input data and coordinate frames, investigate a custom EKF implementation, and compare and validate the resulting estimates.
 
 ## Scope and Limitations
 
