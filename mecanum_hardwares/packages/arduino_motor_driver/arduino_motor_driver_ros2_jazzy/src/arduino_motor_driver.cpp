@@ -1,5 +1,5 @@
 #include "ArduinoMotorDriver/arduino_motor_driver.hpp"
-
+#include <sstream>
 ////////////////////////////////
 
 
@@ -18,6 +18,7 @@ ArduinoMotorDriver::ArduinoMotorDriver(int no_of_motors)
 
 ArduinoMotorDriver::ArduinoMotorDriver(int port, int no_of_motors)
 {
+    (void)port;
     this->no_of_motors_ = no_of_motors;
 }
 
@@ -76,67 +77,73 @@ int ArduinoMotorDriver::Initialize(const std::string& ttydir, const int32_t baud
 
 int ArduinoMotorDriver::Write(const ArduinoCommand cmd)
 {
-         //write pwm speed mm/s-> rpm -> pwm
-        //1. Get command and args from queue
-        //ArduinoCommand cmd = this->command_queue_.front();
+    const int arg_length = cmd.args.size();
+    std::string write_data_buf;
 
-        //2. send data with command data
-        int arg_length = cmd.args.size();
-        std::string write_data_buf;
-        
-        write_data_buf.append(sizeof(char), cmd.command);
+    write_data_buf.push_back(cmd.command);
 
-        for(int i = 0; i < arg_length; i++)
-        {
-            write_data_buf.append(" ");
-            write_data_buf.append(std::to_string(cmd.args[i]));
-        }
-
+    for(int i = 0; i < arg_length; i++)
+    {
         write_data_buf.append(" ");
-        write_data_buf.append("\r"); //EOD
+        write_data_buf.append(std::to_string(cmd.args[i]));
+    }
 
-        if(this->Serial_.SendData((unsigned char*)write_data_buf.c_str(), write_data_buf.length()) < 0)
-            return -1;
+    write_data_buf.append("\r");
 
+    if(this->Serial_.SendData(
+        reinterpret_cast<unsigned char*>(
+            write_data_buf.data()),
+        write_data_buf.length()) < 0)
+    {
+        return -1;
+    }
 
-        // usleep(100*1000);
+    std::string read_data;
+    unsigned char read_buf[MAX_BUF];
 
-        //3. Read data with "OK"
-        std::string read_data;
+    constexpr int ACK_TIMEOUT_US = 1000;
+    constexpr int ACK_RETRY_MAX = 100;
 
-        unsigned char read_buf[MAX_BUF];
+    bool ack_received = false;
 
+    for(int repeat = 0;
+        repeat < ACK_RETRY_MAX;
+        repeat++)
+    {
         memset(read_buf, 0, sizeof(read_buf));
 
-        bool check = false;
-        int utime = 1000; //1ms
+        const int ret =
+            this->Serial_.ReadDataWithTimeout(
+                read_buf,
+                sizeof(read_buf),
+                ACK_TIMEOUT_US);
 
-        int repeat = 0;
-
-        while(!(check))
+        if(ret < 0)
         {
-            if(this->Serial_.ReadDataWithTimeout(read_buf, sizeof(read_buf), utime) < 0)
-                continue;
-
-            read_data.append((char*)read_buf);
-
-            int length = read_data.length();
-
-            // if(read_data[length -1 ] == '\n' && read_data[length -2])
-            //    check = true;
-
-            if (read_data != "OK\r\n")
-                check = true;
-
-            if((repeat++)> 100)
-                return -1;
+            return -1;
         }
 
-        // this->Serial_.ReadDataWithTimeout(read_buf, sizeof(read_buf), utime);
+        if(ret == 0)
+        {
+            continue;
+        }
 
-        //4. delete first command data
-        // this->command_queue_.erase(this->command_queue_.begin());
+        read_data.append(
+            reinterpret_cast<char*>(read_buf),
+            static_cast<size_t>(ret));
 
+        if(read_data.find("OK\r\n") !=
+           std::string::npos)
+        {
+            ack_received = true;
+            break;
+        }
+    }
+
+    if(!ack_received)
+    {
+        return -1;
+    }
 
     return 0;
 }
@@ -163,117 +170,138 @@ int ArduinoMotorDriver::Read(const ArduinoCommand cmd)
 
         memset(read_buf, 0, sizeof(read_buf));
 
-        bool check = false;
-        int utime = 1000;//10ms
-        int repeat = 0;
+        constexpr int READ_TIMEOUT_US = 1000;
+        constexpr int READ_RETRY_MAX = 100;
 
-        while(!(check))
+        bool complete = false;
+
+        for(int repeat = 0;
+            repeat < READ_RETRY_MAX;
+            repeat++)
         {
-            if(this->Serial_.ReadDataWithTimeout(read_buf, sizeof(read_buf), utime) < 0)
-                continue;
+            memset(read_buf, 0, sizeof(read_buf));
 
-            read_data.append((char*)read_buf);
+            const int ret =
+                this->Serial_.ReadDataWithTimeout(
+                    read_buf,
+                    sizeof(read_buf),
+                    READ_TIMEOUT_US);
 
-            int length = read_data.length();
-
-            if(read_data[length -1 ] == '\n' && read_data[length -2])
-               check = true;
-
-            // if (read_data != "OK\r\n")
- 
-            if((repeat++)> 100)
+            if(ret < 0)
+            {
                 return -1;
-        }
-
-        //3. parsing data
-        std::vector<std::string> args;
-        std::vector<int> buf;
-
-        args.resize(this->no_of_motors_);
-        buf.resize(this->no_of_motors_);
-
-        int itr = 0;
-        int length = read_data.length();
-
-        for(int i = 0; i < length; i++)
-        {
-            if(read_data[i] != ' ')
-            {
-                if(read_data[i] == '\r' || read_data[i] == '\n')
-                {
-                    args[itr] += '\0';
-
-                    break;
-                }
-                else
-                    args[itr].append(sizeof(char), read_data[i]);
-            }
-            else
-            {
-                // args[itr].append("\0");
-                args[itr] += '\0';
-                itr++;
             }
 
-        }
-
-        try
-        {
-            switch(cmd.command)
+            if(ret == 0)
             {
-                case 'e': //read encoder
-                {
-                    for(int i = 0; i< this->no_of_motors_; i++)
-                    {
-                        buf[i] = std::stoi(args[i]);
+                continue;
+            }
 
-                        // printf("args[%d] = %s, buf[%d] = %d\r\n", i, args[i].c_str(), i, buf[i]);
-                    }
+            read_data.append(
+                reinterpret_cast<char*>(read_buf),
+                ret);
 
-
-                    break;
-                }
-
-                case 'z': //read rpm
-                {
-                    for(int i = 0; i< this->no_of_motors_; i++)
-                        buf[i] = std::stoi(args[i]);
-
-                    break;
-                }
-
-                default: break;
+            if(read_data.find("\r\n") !=
+            std::string::npos)
+            {
+                complete = true;
+                break;
             }
         }
-        catch(const std::exception& e)
+
+        if(!complete)
         {
             return -1;
         }
-        
+
+        // 3. Parse response
+        const size_t eol_pos = read_data.find("\r\n");
+
+        if(eol_pos == std::string::npos)
+        {
+            return -1;
+        }
+
+        // Only parse one complete response frame.
+        const std::string frame =
+            read_data.substr(0, eol_pos);
+
+        std::istringstream stream(frame);
+
         switch(cmd.command)
         {
-            case 'e': //read encoder
+            case 'e':
             {
-                for(int i = 0; i< this->no_of_motors_; i++)
-                    this->motor_data_[i].encoder = buf[i];
+                std::vector<int32_t> encoder_buf(
+                    this->no_of_motors_);
 
-                // printf("encoder = %d, %d, %d, %d\r\n", this->motor_data_[0].encoder, 
-                //                                         this->motor_data_[1].encoder,
-                //                                         this->motor_data_[2].encoder,
-                //                                         this->motor_data_[3].encoder);
-                    
+                for(int i = 0;
+                    i < this->no_of_motors_;
+                    i++)
+                {
+                    if(!(stream >> encoder_buf[i]))
+                    {
+                        return -1;
+                    }
+                }
+
+                // Reject unexpected extra tokens.
+                std::string extra_token;
+
+                if(stream >> extra_token)
+                {
+                    return -1;
+                }
+
+                // Commit only after the whole frame is valid.
+                for(int i = 0;
+                    i < this->no_of_motors_;
+                    i++)
+                {
+                    this->motor_data_[i].encoder =
+                        encoder_buf[i];
+                }
+
                 break;
             }
 
-            case 'z': //read rpm
+            case 'z':
             {
-                for(int i = 0; i< this->no_of_motors_; i++)
-                    this->motor_data_[i].rpm = buf[i];
+                std::vector<float> rpm_buf(
+                    this->no_of_motors_);
+
+                for(int i = 0;
+                    i < this->no_of_motors_;
+                    i++)
+                {
+                    if(!(stream >> rpm_buf[i]))
+                    {
+                        return -1;
+                    }
+                }
+
+                std::string extra_token;
+
+                if(stream >> extra_token)
+                {
+                    return -1;
+                }
+
+                for(int i = 0;
+                    i < this->no_of_motors_;
+                    i++)
+                {
+                    this->motor_data_[i].rpm =
+                        rpm_buf[i];
+                }
 
                 break;
             }
 
-            default: break;
+            default:
+            {
+                return -1;
+            }
         }
 
         if((this->read_queue_)++ >1)
@@ -292,8 +320,10 @@ int ArduinoMotorDriver::MainWorker()
         ArduinoCommand cmd = this->command_queue_.front();
 
         //2. do Write thing
-        if(this->Write(cmd) < 0);
+        if(this->Write(cmd) < 0)
+        {
             return -1;
+        }
 
         //3. delete first command data
         this->command_queue_.erase(this->command_queue_.begin());
@@ -328,8 +358,10 @@ int ArduinoMotorDriver::MainWorker()
         }
 
         //2. do thing
-        if(this->Read(cmd) < 0);
+        if(this->Read(cmd) < 0)
+        {
             return -1;
+        }
 
 
         if((this->read_queue_)++ >1)
@@ -388,11 +420,14 @@ int ArduinoMotorDriver::MainWorker()
 
 
 
-void ArduinoMotorDriver::SetMacanummVelData(int vel1, int vel2, int vel3, int vel4)
+void ArduinoMotorDriver::SetMacanummVelData(
+    float vel1,
+    float vel2,
+    float vel3,
+    float vel4)
 {
-
     ArduinoCommand cmd;
-    
+
     cmd.command = 'm';
     cmd.args.push_back(vel1);
     cmd.args.push_back(vel2);
@@ -400,27 +435,45 @@ void ArduinoMotorDriver::SetMacanummVelData(int vel1, int vel2, int vel3, int ve
     cmd.args.push_back(vel4);
 
     this->command_queue_.push_back(cmd);
-
-    return;
 }
 
 
-int ArduinoMotorDriver::ReadRPM(int motor)
+float ArduinoMotorDriver::ReadRPM(int motor)
 {
-    int select = motor -1;
+    const int select = motor - 1;
 
-    if (select < 0 || select >= this->motor_data_.size())
-        return 0;
+    if(select < 0)
+    {
+        return 0.0f;
+    }
 
-    return this->motor_data_.at(select).rpm;
+    const size_t index =
+        static_cast<size_t>(select);
+
+    if(index >= this->motor_data_.size())
+    {
+        return 0.0f;
+    }
+
+    return this->motor_data_[index].rpm;
 }
 
 int ArduinoMotorDriver::ReadEncoder(int motor)
 {
-    int select = motor -1;
+    const int select = motor - 1;
 
-    if (select < 0 || select >= this->motor_data_.size())
+    if(select < 0)
+    {
         return 0;
+    }
 
-    return this->motor_data_.at(select).encoder;
+    const size_t index =
+        static_cast<size_t>(select);
+
+    if(index >= this->motor_data_.size())
+    {
+        return 0;
+    }
+
+    return this->motor_data_[index].encoder;
 }

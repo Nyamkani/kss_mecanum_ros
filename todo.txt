@@ -1,0 +1,6 @@
+#021625
+to-do list
+
+1. robot-localization (ros)
+2. Config - udev -> to designat serial port
+3. add nav2, slam-tools

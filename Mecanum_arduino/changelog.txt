@@ -1,0 +1,170 @@
+# Mecanum4WD Arduino Motor Controller v2.0 - CHANGELOG
+
+## 주요 변경
+
+* UART parser 개선
+
+  * Arduino `String` 제거
+  * fixed char buffer + `strtok_r()` 사용
+  * `while (Serial.available())` 방식으로 수신 데이터 처리
+  * motor command argument를 float RPM으로 변경
+
+* Motor command 단위 변경
+
+  * 기존 `ticks/frame` → `RPM`
+  * `m <rpm1> <rpm2> <rpm3> <rpm4>`
+  * m/s 변환은 Linux/ROS 계층에서 담당
+
+* Encoder 접근 안정성 개선
+
+  * encoder position을 `volatile int32_t`로 변경
+  * 32-bit read/write에 `ATOMIC_BLOCK` 적용
+
+* PCA9685 설정 정리
+
+  * 사용하지 않는 Servo 관련 코드 제거
+  * PWM carrier frequency: `50 Hz → 1600 Hz`
+
+* Motor output 함수 정리
+
+  * 음수 PWM saturation 오류 수정
+  * `setMotorSpeed()`와 `motorRun()` 역할 분리
+
+* Auto-stop 수정
+
+  * timeout 이후 motor stop 명령이 반복 실행되던 구조 수정
+  * `moving` 조건을 사용한 one-shot stop으로 변경
+
+* PID scheduler 개선
+
+  * `millis()` → `micros()` 기반
+  * 실제 PID 실행 간격 `dt` 계산
+  * catch-up 실행 방지를 위해 다음 실행 시간을 실제 sample 시점 기준으로 설정
+
+* 기존 `ticks/frame` PID 제거
+
+  * `TargetTicksPerFrame`
+  * integer Perror
+  * 이전 output 누적 방식
+  * 기존 incremental PID 구조 제거
+
+* RPM 기반 PI controller로 변경
+
+  * `target_rpm - measured_rpm`
+  * 실제 `dt` 기반 integral 계산
+  * PWM 출력 범위 `-255 ~ +255`
+  * anti-windup 적용
+
+* RPM 측정 구조 변경
+
+  * encoder delta + 실제 dt로 RPM 계산
+  * `z` command는 최신 계산 RPM만 반환
+  * UART query 주기와 RPM measurement 주기 분리
+
+## PID 주기 테스트
+
+* 100 Hz
+
+  * 30/60 RPM에서는 정상
+  * 90 RPM에서 실행시간 약 9 ms 이상
+  * 일부 deadline miss 발생
+  * 고속 영역에서 margin 부족
+
+* 80 Hz
+
+  * period: 12.5 ms
+  * 고속 영역에서 scheduling margin 개선
+  * 최종 후보 주기로 결정
+
+## PI Gain Tuning
+
+테스트:
+
+```text
+2 / 0 / 0
+2 / 1 / 0
+2 / 2 / 0
+3 / 2 / 0
+5 / 3 / 0
+5 / 5 / 0
+```
+
+현재 기준:
+
+```cpp
+PID_KP = 5.0f;
+PID_KI = 5.0f;
+PID_KD = 0.0f;
+```
+
+30 / 60 / 90 RPM에서 안정적으로 target RPM 추종 확인.
+
+## M3 RPM 변동 분석
+
+* M3에서 80 Hz 순간 RPM 값이 다른 motor보다 크게 변동
+* PID frame별 encoder delta도 같이 변동
+* 약 100 ms raw encoder count를 별도로 확인
+
+90 RPM 이론값:
+
+```text
+약 648 ticks / 100 ms
+```
+
+실측:
+
+```text
+대체로 약 640 ~ 680 ticks / 100 ms
+```
+
+따라서 encoder count 유실보다는 짧은 PID frame 단위에서 encoder tick 분포가 불균일한 현상으로 판단.
+
+## RPM LPF 추가
+
+1차 LPF 적용:
+
+```cpp
+RPM_LPF_ALPHA = 0.5f;
+```
+
+구조:
+
+```text
+encoder delta
+→ raw RPM
+→ LPF
+→ measured RPM
+→ PI controller
+```
+
+M3 순간 RPM spike가 완화되었으며 반응성 저하는 크지 않음.
+
+## 현재 기준 설정
+
+```cpp
+PID_RATE_HZ = 80;
+
+PID_KP = 5.0f;
+PID_KI = 5.0f;
+PID_KD = 0.0f;
+
+RPM_LPF_ALPHA = 0.5f;
+
+ENCODER_COUNTS_PER_REV = 4320.0f;
+
+PCA9685_PWM_FREQ = 1600 Hz;
+```
+
+현재 Arduino Motor Controller v2.0의 기본 구조:
+
+```text
+RPM command
+→ Encoder
+→ Raw RPM
+→ LPF
+→ PI controller
+→ PWM
+→ Motor
+```
+
+다음 단계: Linux/ROS Motor Node v2.0.

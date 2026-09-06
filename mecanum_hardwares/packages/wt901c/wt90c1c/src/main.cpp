@@ -84,12 +84,12 @@ int main(int argc, char* argv[])
 
         if (++tick >= 1000) tick = 0;
 
-        if (tick % 20 == 0) {
+        if (tick % 10 == 0) {
             drive_tick = true;
             imu_pub_tick = true;
         }
 
-        if (tick % 100 == 0) {
+        if (tick % 50 == 0) {
             mag_pub_tick = true;
         }
 
@@ -98,11 +98,11 @@ int main(int argc, char* argv[])
             imu->Drive();
             drive_tick = false;
         }
-        else if (imu_pub_tick) {
+        if (imu_pub_tick) {
             imu->PublishImuMsg();
             imu_pub_tick = false;
         }
-        else if (mag_pub_tick) {
+        if (mag_pub_tick) {
             imu->PublishMagMsg();
             mag_pub_tick = false;
         }

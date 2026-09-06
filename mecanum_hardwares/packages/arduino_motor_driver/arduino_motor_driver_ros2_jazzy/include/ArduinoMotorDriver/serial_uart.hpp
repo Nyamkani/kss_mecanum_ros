@@ -64,7 +64,7 @@
 
 #define UART_MAX_BUF_SIZE             255U
 
-#define SERIAL_DATA_SLEEP_TIME         10U  //us
+#define SERIAL_DATA_SLEEP_TIME_US         10U  //us
 
 class SerialComm
 {

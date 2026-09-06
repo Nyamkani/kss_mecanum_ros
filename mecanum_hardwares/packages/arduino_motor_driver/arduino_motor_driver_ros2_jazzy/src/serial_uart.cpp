@@ -202,14 +202,17 @@ int SerialComm::SendData(unsigned char *msg, const size_t msg_length)
     memcpy(tx_buffer, msg, msg_length);
 
     //Filestream, bytes to write, number of bytes to write
-    size_t count = write(fid, tx_buffer, msg_length);	
+    const ssize_t count =
+        write(fid, tx_buffer, msg_length);
 
-    if (count != msg_length) 
+    if(count < 0 ||
+    static_cast<size_t>(count) != msg_length)
+    {
         printf("UART TX error\n");
+        return -1;
+    }
 
-    usleep(SERIAL_DATA_SLEEP_TIME);  
-
-    tcflush(fid, TCIOFLUSH);
+    usleep(SERIAL_DATA_SLEEP_TIME_US);
 
     return 0;
 }
@@ -249,7 +252,7 @@ int SerialComm::ReadData(unsigned char *recv_msg, const size_t recv_msg_length)
 
         total_recv_length_ += rx_length_;
 
-        usleep(SERIAL_DATA_SLEEP_TIME); 
+        usleep(SERIAL_DATA_SLEEP_TIME_US); 
 
         tcflush(fid, TCIOFLUSH);
     }
@@ -258,79 +261,49 @@ int SerialComm::ReadData(unsigned char *recv_msg, const size_t recv_msg_length)
 }
 
 
-int SerialComm::ReadDataWithTimeout(unsigned char *recv_msg, const size_t recv_msg_length, size_t timeout_val)
+int SerialComm::ReadDataWithTimeout(
+    unsigned char *recv_msg,
+    const size_t recv_msg_length,
+    size_t timeout_val)
 {
     if(!(this->is_init_))
     {
         printf("Init is not done. Read data failed.\r\n");
-
         return -1;
     }
 
     const int fid = this->ttyfd_;
+
     fd_set set;
+    FD_ZERO(&set);
+    FD_SET(fid, &set);
+
     struct timeval timeout;
-    int rv;
+    timeout.tv_sec = timeout_val / 1000000;
+    timeout.tv_usec = timeout_val % 1000000;
 
-    FD_ZERO(&set); /* clear the set */
-    FD_SET(fid, &set); /* add our file descriptor to the set */
+    const int rv =
+        select(fid + 1, &set, nullptr, nullptr, &timeout);
 
-    timeout.tv_sec = 0;
-    timeout.tv_usec = timeout_val;
-
-    unsigned char rx_buffer[UART_MAX_BUF_SIZE] = {0,}; //for preventing string - null error
-
-    /* there was data to read */
-    size_t total_recv_length_= 0;
-
-    while(total_recv_length_ < recv_msg_length)
+    if(rv < 0)
     {
-        rv = select(fid + 1, &set, NULL, NULL, &timeout);
-        
-        if(rv == -1)
-        {
-            memset(recv_msg, '\0', recv_msg_length);
-
-            return -1; /* an error accured */
-        }
-        else if(rv == 0)
-        {
-            // memset(recv_msg, 0, recv_msg_length);
-
-            // printf("Read timeout\r\n"); /* a timeout occured */
-            
-            return 1;
-        }
-        else
-        {
-            //Filestream, bytes to write, number of bytes to wrrx_lengthite
-            int rx_length_ = read(fid, rx_buffer, sizeof(rx_buffer)/sizeof(unsigned char));	
-
-            if (rx_length_ < 0)
-            {
-                printf("UART TX error\n");
-
-                memset(recv_msg, 0, recv_msg_length);
-
-                return -1;
-            }
-            else if(rx_length_ > 0)
-            {
-                // printf("got msg_length : %d\r\n", rx_length_);
-                
-                memcpy(recv_msg, (void*)&rx_buffer[total_recv_length_], rx_length_);
-            }
-
-            total_recv_length_ += rx_length_;
-
-            usleep(1); 
-        }
-
+        return -1;
     }
 
-    tcflush(fid, TCIOFLUSH);
+    if(rv == 0)
+    {
+        return 0;   // timeout
+    }
 
-    return 0;
+    const ssize_t rx_length =
+        read(fid, recv_msg, recv_msg_length);
+
+    if(rx_length < 0)
+    {
+        return -1;
+    }
+
+    return static_cast<int>(rx_length);
 }
 
 

@@ -55,7 +55,7 @@ class MacanumMotorDriver : public rclcpp::Node
         rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pubs_;
 
         //time (ms)
-        size_t odom_pub_time_ = 30;
+        size_t odom_pub_time_ = 15;
         size_t joint_state_pub_time_ = 50;
 
         //main class
@@ -82,10 +82,12 @@ class MacanumMotorDriver : public rclcpp::Node
         double wheel_radius_ = 41.0f; //mm
 
         //encoder
-        int front_left_motor_prev_enc_ = 0.0f;
-        int front_right_motor_prev_enc_ = 0.0f;
-        int rear_left_motor_prev_enc_ = 0.0f;
-        int rear_right_motor_prev_enc_ = 0.0f;
+        uint8_t encoder_invalid_count_ = 0;
+
+        int32_t front_left_motor_prev_enc_ = 0;
+        int32_t front_right_motor_prev_enc_ = 0;
+        int32_t rear_left_motor_prev_enc_ = 0;
+        int32_t rear_right_motor_prev_enc_ = 0;
 
 
         double front_left_motor_rpm_ = 0.0f;
@@ -119,7 +121,7 @@ class MacanumMotorDriver : public rclcpp::Node
 
 
         //time
-        std::chrono::system_clock::time_point prev_time_;
+        std::chrono::steady_clock::time_point prev_time_;
         
     public:
 

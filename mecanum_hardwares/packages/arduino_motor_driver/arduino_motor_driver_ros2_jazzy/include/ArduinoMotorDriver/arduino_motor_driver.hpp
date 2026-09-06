@@ -37,22 +37,21 @@ extern "C" {
 
 #define MAX_BUF 100
 
-struct ArduinoCommand 
+struct ArduinoCommand
 {
     char command;
-    std::vector<int> args;
+    std::vector<float> args;
 };
-
 
 struct MotorData
 {
-    int encoder;
-    int rpm;
+    int32_t encoder;
+    float rpm;
 
     MotorData()
     {
         encoder = 0;
-        rpm = 0;
+        rpm = 0.0f;
     }
 };
 
@@ -110,8 +109,14 @@ class ArduinoMotorDriver
         int Read(const ArduinoCommand cmd);
 
 
-        void SetMacanummVelData(int vel1, int vel2, int vel3, int vel4);
-        int ReadRPM(int motor);
+        void SetMacanummVelData(
+            float vel1,
+            float vel2,
+            float vel3,
+            float vel4);
+
+        float ReadRPM(int motor);
+        
         int ReadEncoder(int motor);
 };
 

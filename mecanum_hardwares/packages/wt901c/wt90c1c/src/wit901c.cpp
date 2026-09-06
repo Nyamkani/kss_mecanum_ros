@@ -27,7 +27,7 @@ int Wt901c::Initialize()
         close(this->fd_);
     }
 
-    if((this->fd_ = serial_open((unsigned char*)this->dir_, this->s_iCurBaud_) < 0))
+	if((this->fd_ = serial_open((unsigned char*)this->dir_,this->s_iCurBaud_)) < 0)
     {
         printf("open %s fail\n", this->dir_);
         return -1;

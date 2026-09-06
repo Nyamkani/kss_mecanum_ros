@@ -1,6 +1,30 @@
 #include "ArduinoMotorDriver/mecanum_motor_controller.hpp"
 
 
+static int64_t EncoderDelta(
+    int32_t current,
+    int32_t previous)
+{
+    int64_t delta =
+        static_cast<int64_t>(current) -
+        static_cast<int64_t>(previous);
+
+    constexpr int64_t ENC_RANGE =
+        (1LL << 32);
+
+    if(delta > INT32_MAX)
+    {
+        delta -= ENC_RANGE;
+    }
+    else if(delta < INT32_MIN)
+    {
+        delta += ENC_RANGE;
+    }
+
+    return delta;
+}
+
+
 using std::placeholders::_1;
 
 
@@ -91,20 +115,38 @@ int MacanumMotorDriver::Initialize()
 
     this->motor_Driver_ = new ArduinoMotorDriver(0,4);  //port 0, no of motors = 4
 
-    if(this->motor_Driver_->Initialize(this->serial_port, this->serial_baudrate) < 0)
-        return -1; 
-
     ArduinoCommand cmd;
+
+    if(this->motor_Driver_->Initialize(
+        this->serial_port,
+        this->serial_baudrate) < 0)
+    {
+        printf("Motor serial initialize failed\n");
+        return -1;
+    }
+
+    printf("Motor serial initialize OK\n");
+
+    // CH340/Arduino serial open 후 reset/boot 대기
+    usleep(2000 * 1000);
 
     cmd.command = 'r';
     cmd.args.clear();
 
-    this->motor_Driver_->Write(cmd);
+    if(this->motor_Driver_->Write(cmd) < 0)
+    {
+        printf("Motor reset ACK failed\n");
+        return -1;
+    }
 
     cmd.command = 'e';
     cmd.args.clear();
 
-    this->motor_Driver_->Read(cmd);
+    if(this->motor_Driver_->Read(cmd) < 0)
+    {
+        printf("Motor initial encoder read failed\n");
+        return -1;
+    }
 
     this->front_left_motor_prev_enc_ = motor_Driver_->ReadEncoder(1);
     this->front_right_motor_prev_enc_ = motor_Driver_->ReadEncoder(4);    //actually arduino motor 4
@@ -112,7 +154,7 @@ int MacanumMotorDriver::Initialize()
     this->rear_right_motor_prev_enc_ = motor_Driver_->ReadEncoder(3);
         
 
-    this->prev_time_ = std::chrono::system_clock::now();
+    this->prev_time_ = std::chrono::steady_clock::now();
 
     return 0;
 }
@@ -181,149 +223,321 @@ int test_cnt = 0;
 //When tick is on, publish motor data
 void MacanumMotorDriver::TwistPubWorker()
 {
-    // this->CalOdomByEncoder();
+    this->CalOdomByEncoder();
 
-    this->CalOdomByRPM();
+    // this->CalOdomByRPM();
 
     return;
 }
 
-
 void MacanumMotorDriver::CalOdomByEncoder()
 {
- //calculate odometry
-    //must set hardware value - wheel radius
-    // if(this->test_flag == false)
-    // {
-        ArduinoCommand cmd;
+    // ---------------------------------------------------------
+    // 1. Read encoder
+    // ---------------------------------------------------------
+    ArduinoCommand cmd;
 
-        cmd.command = 'e'; 
-        cmd.args.clear();
+    cmd.command = 'e';
+    cmd.args.clear();
 
-        if(this->motor_Driver_->Read(cmd) <0)
-            return ;
+    if(this->motor_Driver_->Read(cmd) < 0)
+    {
+        return;
+    }
 
-        int front_left_motor_enc = motor_Driver_->ReadEncoder(1);
-        int front_right_motor_enc = motor_Driver_->ReadEncoder(4);    //actually arduino motor 4
-        int rear_left_motor_enc = motor_Driver_->ReadEncoder(2);    //actually arduino motor 2
-        int rear_right_motor_enc = motor_Driver_->ReadEncoder(3);
-        
-        // this->test_flag = true;
-        // printf("%d, %d, %d, %d\r\n",front_left_motor_enc, front_right_motor_enc, rear_left_motor_enc,rear_right_motor_enc);
-        // return;
-    // }
-    // else if(this->test_flag)
-    // {
-        // double rpm_data_to_theta = (M_PI/180.0f)*(360.0f)*(1.0f/60.0f); //rad *deg* rps //60rpm -> 1rev/s ->360deg/s->2*Pi/s
+    const int32_t front_left_motor_enc =
+        this->motor_Driver_->ReadEncoder(1);
 
-        double front_left_motor_delta_theta = (double)(front_left_motor_enc - this->front_left_motor_prev_enc_)/MOTOR_ENC_CNT;
-        double front_right_motor_delta_theta = (double)(front_right_motor_enc - this->front_right_motor_prev_enc_)/MOTOR_ENC_CNT;
-        double rear_left_motor_delta_theta = (double)(rear_left_motor_enc - this->rear_left_motor_prev_enc_)/MOTOR_ENC_CNT;
-        double rear_right_motor_delta_theta = (double)(rear_right_motor_enc - this->rear_right_motor_prev_enc_)/MOTOR_ENC_CNT;
+    const int32_t front_right_motor_enc =
+        this->motor_Driver_->ReadEncoder(4);
+
+    const int32_t rear_left_motor_enc =
+        this->motor_Driver_->ReadEncoder(2);
+
+    const int32_t rear_right_motor_enc =
+        this->motor_Driver_->ReadEncoder(3);
 
 
-        this->front_left_motor_prev_enc_ = front_left_motor_enc;
-        this->front_right_motor_prev_enc_ = front_right_motor_enc;
-        this->rear_left_motor_prev_enc_ = rear_left_motor_enc;
-        this->rear_right_motor_prev_enc_ = rear_right_motor_enc;
+    // ---------------------------------------------------------
+    // 2. Calculate elapsed time
+    // ---------------------------------------------------------
+    const auto now =
+        std::chrono::steady_clock::now();
 
-        this->front_left_motor_dtheta_ = front_left_motor_delta_theta;
-        this->front_right_motor_dtheta_ = front_right_motor_delta_theta;
-        this->rear_left_motor_dtheta_ = rear_left_motor_delta_theta;
-        this->rear_right_motor_dtheta_ = rear_right_motor_delta_theta;
+    const double dt_sec =
+        std::chrono::duration<double>(
+            now - this->prev_time_).count();
 
-        //now this is rad
-        front_left_motor_delta_theta *= (2*M_PI*this->is_motor_reversed_);
-        front_right_motor_delta_theta *= (2*M_PI*this->is_motor_reversed_);
-        rear_left_motor_delta_theta *= (2*M_PI*this->is_motor_reversed_);
-        rear_right_motor_delta_theta *= (2*M_PI*this->is_motor_reversed_);
-
-        double dtx = (this->wheel_radius_/(4.0f* 1000.0f))
-                                    *(front_left_motor_delta_theta + front_right_motor_delta_theta 
-                                    + rear_right_motor_delta_theta + rear_left_motor_delta_theta);  //makes mm to m
-        double dty = (this->wheel_radius_/(4.0f* 1000.0f))
-                                    *(-1*front_left_motor_delta_theta + front_right_motor_delta_theta 
-                                    -1*rear_right_motor_delta_theta + rear_left_motor_delta_theta);  //makes mm to m
-        
-        double dtz = (this->wheel_radius_/((4.0f))*(1.0f/(0.5*(this->wheel_base_ + this->wheel_seperate_))))
-                                    *(-1*front_left_motor_delta_theta + front_right_motor_delta_theta 
-                                    +rear_right_motor_delta_theta -1*rear_left_motor_delta_theta);  //makes mm to m
-        
+    if(dt_sec <= 0.0)
+    {
+        return;
+    }
 
 
-        this->x_pos_ += dtx*cos(this->w_z_)-dty*sin(this->w_z_);
-        this->y_pos_ += dtx*sin(this->w_z_)+dty*cos(this->w_z_);
+    // ---------------------------------------------------------
+    // 3. Calculate encoder delta
+    //    EncoderDelta() handles int32_t wrap-around.
+    // ---------------------------------------------------------
+    const int64_t front_left_delta_enc =
+        EncoderDelta(
+            front_left_motor_enc,
+            this->front_left_motor_prev_enc_);
 
-        this->w_z_ += dtz;
+    const int64_t front_right_delta_enc =
+        EncoderDelta(
+            front_right_motor_enc,
+            this->front_right_motor_prev_enc_);
 
-        if( this->w_z_ >= M_PI)
-            this->w_z_ -=2*M_PI;
-        else if ( this->w_z_ <= -M_PI)
-            this->w_z_ +=2*M_PI;
+    const int64_t rear_left_delta_enc =
+        EncoderDelta(
+            rear_left_motor_enc,
+            this->rear_left_motor_prev_enc_);
 
-        auto now = std::chrono::system_clock::now();
-        auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->prev_time_);
-        double dt = millisec.count();
+    const int64_t rear_right_delta_enc =
+        EncoderDelta(
+            rear_right_motor_enc,
+            this->rear_right_motor_prev_enc_);
 
-        if(dt >= 10)
+
+    // ---------------------------------------------------------
+    // 4. Encoder sanity check
+    //
+    // maximum allowable encoder movement is calculated from:
+    //
+    // RPM -> rev/s -> encoder count / dt
+    //
+    // 200 RPM is intentionally larger than normal driving speed.
+    // ---------------------------------------------------------
+    constexpr double ODOM_MAX_WHEEL_RPM = 200.0;
+    constexpr double ODOM_DELTA_MARGIN = 1.5;
+
+    const double max_delta_enc =
+        (ODOM_MAX_WHEEL_RPM / 60.0)
+        * static_cast<double>(MOTOR_ENC_CNT)
+        * dt_sec
+        * ODOM_DELTA_MARGIN;
+
+    const auto is_delta_valid =
+        [max_delta_enc](int64_t delta)
         {
-            dtx /=dt;
-            dty /=dt;
-            dtz /=dt;
+            return std::abs(
+                static_cast<double>(delta))
+                <= max_delta_enc;
+        };
 
-            if(isnan(dtx) != 0)
-                dtx = 0.0f;
+    constexpr uint8_t ODOM_RESYNC_INVALID_COUNT = 3;
 
-            if(isnan(dty) != 0)
-                dty = 0.0f;
+    const bool encoder_delta_valid =
+        is_delta_valid(front_left_delta_enc)  &&
+        is_delta_valid(front_right_delta_enc) &&
+        is_delta_valid(rear_left_delta_enc)   &&
+        is_delta_valid(rear_right_delta_enc);
 
-            if(isnan(dtz) != 0)
-                dtz = 0.0f;
+    if(!encoder_delta_valid)
+    {
+        this->encoder_invalid_count_++;
 
-            this->vbx_ = dtx;                     
-            this->vby_ = dty;
-            this->wbz_ = dtz;
+        if(this->encoder_invalid_count_ >=
+        ODOM_RESYNC_INVALID_COUNT)
+        {
+            // Persistent invalid delta:
+            // assume encoder reference has changed
+            // (e.g. MCU reboot / encoder reset).
+            //
+            // Re-sync only the ROS-side baseline.
+            this->front_left_motor_prev_enc_ =
+                front_left_motor_enc;
 
-            if(test_cnt++>=100)
-            {
-                printf("xpos = %lf, ypos = %lf, angle =  %lf, dt = %lf\r\n", x_pos_,y_pos_,w_z_, dt);
+            this->front_right_motor_prev_enc_ =
+                front_right_motor_enc;
 
-                test_cnt = 0;
-            }
+            this->rear_left_motor_prev_enc_ =
+                rear_left_motor_enc;
 
+            this->rear_right_motor_prev_enc_ =
+                rear_right_motor_enc;
 
             this->prev_time_ = now;
 
-            this->PublishOdomMsg();
+            this->encoder_invalid_count_ = 0;
         }
 
+        return;
+    }
 
-        // vbx = (vbx*sin(wbz) + vby*(cos(wbz)-1))/wbz;
-        // vby = (vby*sin(wbz) + vbx*(1-cos(wbz))) /wbz;
-
-        // // double current_angle = this->wbz_*(180.0f/(M_PI));
-
-        // double final_vbx = vbx*cos(this->w_z_)-vby*sin(this->w_z_);
-        // double final_vby = vbx*sin(this->w_z_)+vby*cos(this->w_z_);
-        // double final_wbz = wbz;
-
-        
-        // this->x_pos_ += final_vbx*dt.count();
-        // this->y_pos_ += final_vby*dt.count();
-
-        // this->w_z_ += final_wbz*dt.count();
-
-        // printf("%lf,%lf, %lf\r\n", x_pos_,y_pos_,w_z_);
-
-        // this->PublishOdomMsg();
-
-        // this->BroadCastOdomMsg();
+    this->encoder_invalid_count_ = 0;
 
 
-    //     this->test_flag = false;
-    // }
+    // ---------------------------------------------------------
+    // 5. Valid frame -> update previous encoder
+    // ---------------------------------------------------------
+    this->front_left_motor_prev_enc_ =
+        front_left_motor_enc;
 
-    return;
+    this->front_right_motor_prev_enc_ =
+        front_right_motor_enc;
+
+    this->rear_left_motor_prev_enc_ =
+        rear_left_motor_enc;
+
+    this->rear_right_motor_prev_enc_ =
+        rear_right_motor_enc;
+
+
+    // ---------------------------------------------------------
+    // 6. Encoder count -> wheel angle delta [rad]
+    // ---------------------------------------------------------
+    constexpr double ENC_TO_RAD =
+        (2.0 * M_PI)
+        / static_cast<double>(MOTOR_ENC_CNT);
+
+    const double front_left_motor_delta_theta =
+        static_cast<double>(front_left_delta_enc)
+        * ENC_TO_RAD
+        * this->is_motor_reversed_;
+
+    const double front_right_motor_delta_theta =
+        static_cast<double>(front_right_delta_enc)
+        * ENC_TO_RAD
+        * this->is_motor_reversed_;
+
+    const double rear_left_motor_delta_theta =
+        static_cast<double>(rear_left_delta_enc)
+        * ENC_TO_RAD
+        * this->is_motor_reversed_;
+
+    const double rear_right_motor_delta_theta =
+        static_cast<double>(rear_right_delta_enc)
+        * ENC_TO_RAD
+        * this->is_motor_reversed_;
+
+
+    // Keep wheel delta values for diagnostic / legacy use.
+    // Unit is now consistently [rad].
+    this->front_left_motor_dtheta_ =
+        front_left_motor_delta_theta;
+
+    this->front_right_motor_dtheta_ =
+        front_right_motor_delta_theta;
+
+    this->rear_left_motor_dtheta_ =
+        rear_left_motor_delta_theta;
+
+    this->rear_right_motor_dtheta_ =
+        rear_right_motor_delta_theta;
+
+
+    // ---------------------------------------------------------
+    // 7. Mecanum forward kinematics
+    //
+    // wheel_radius_     : mm
+    // wheel_base_       : mm
+    // wheel_seperate_   : mm
+    //
+    // dtx, dty          : m
+    // dtz               : rad
+    // ---------------------------------------------------------
+    const double wheel_radius_m =
+        this->wheel_radius_ / 1000.0;
+
+    const double rotation_radius =
+        0.5
+        * (this->wheel_base_
+           + this->wheel_seperate_);
+
+    const double dtx =
+        (wheel_radius_m / 4.0)
+        * (
+            front_left_motor_delta_theta
+            + front_right_motor_delta_theta
+            + rear_left_motor_delta_theta
+            + rear_right_motor_delta_theta
+        );
+
+    const double dty =
+        (wheel_radius_m / 4.0)
+        * (
+            -front_left_motor_delta_theta
+            + front_right_motor_delta_theta
+            + rear_left_motor_delta_theta
+            - rear_right_motor_delta_theta
+        );
+
+    const double dtz =
+        (this->wheel_radius_
+         / (4.0 * rotation_radius))
+        * (
+            -front_left_motor_delta_theta
+            + front_right_motor_delta_theta
+            - rear_left_motor_delta_theta
+            + rear_right_motor_delta_theta
+        );
+
+
+    // ---------------------------------------------------------
+    // 8. Body displacement -> odom/world frame
+    // ---------------------------------------------------------
+    const double yaw =
+        this->w_z_;
+
+    this->x_pos_ +=
+        dtx * std::cos(yaw)
+        - dty * std::sin(yaw);
+
+    this->y_pos_ +=
+        dtx * std::sin(yaw)
+        + dty * std::cos(yaw);
+
+    this->w_z_ += dtz;
+
+
+    // ---------------------------------------------------------
+    // 9. Normalize yaw [-pi, pi]
+    // ---------------------------------------------------------
+    if(this->w_z_ >= M_PI)
+    {
+        this->w_z_ -= 2.0 * M_PI;
+    }
+    else if(this->w_z_ <= -M_PI)
+    {
+        this->w_z_ += 2.0 * M_PI;
+    }
+
+
+    // ---------------------------------------------------------
+    // 10. Body velocity
+    // ---------------------------------------------------------
+    const double vbx =
+        dtx / dt_sec;
+
+    const double vby =
+        dty / dt_sec;
+
+    const double wbz =
+        dtz / dt_sec;
+
+    this->vbx_ =
+        std::isnan(vbx)
+        ? 0.0
+        : vbx;
+
+    this->vby_ =
+        std::isnan(vby)
+        ? 0.0
+        : vby;
+
+    this->wbz_ =
+        std::isnan(wbz)
+        ? 0.0
+        : wbz;
+
+
+    // ---------------------------------------------------------
+    // 11. Commit sample time and publish
+    // ---------------------------------------------------------
+    this->prev_time_ = now;
+
+    this->PublishOdomMsg();
 }
 
 void MacanumMotorDriver::CalOdomByRPM()
@@ -374,15 +588,17 @@ void MacanumMotorDriver::CalOdomByRPM()
     this->wbz_ = wbz;
 
 
-    auto now = std::chrono::system_clock::now();
-    auto millisec = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->prev_time_);
-    double dt = millisec.count();
+    auto now = std::chrono::steady_clock::now();
 
-    if(dt >= 10)
+    const double dt_sec =
+        std::chrono::duration<double>(
+            now - this->prev_time_).count();
+
+    if(dt_sec >= 10)
     {
-        vbx *=dt/1000;
-        vby *=dt/1000;
-        wbz *=dt/1000;
+        vbx *=dt_sec/1000;
+        vby *=dt_sec/1000;
+        wbz *=dt_sec/1000;
 
         if(isnan(vbx) != 0)
             vbx = 0.0f;
@@ -421,50 +637,44 @@ void MacanumMotorDriver::CalOdomByRPM()
 
 void MacanumMotorDriver::JointStatePubWorker()
 {
-    // ArduinoCommand cmd;
-
-    // cmd.command = 'z';
-    // cmd.args.clear();
-
-    // this->motor_Driver_->Read(cmd);
-
-    // this->front_left_motor_rpm_ = motor_Driver_->ReadRPM(1);
-    // this->front_right_motor_rpm_ = motor_Driver_->ReadRPM(4);    //actually arduino motor 4
-    // this->rear_left_motor_rpm_ = motor_Driver_->ReadRPM(2);    //actually arduino motor 2
-    // this->rear_right_motor_rpm_ = motor_Driver_->ReadRPM(3);
-
     sensor_msgs::msg::JointState js;
 
     js.header.stamp = this->get_clock()->now();
- 
-    js.name.resize(4);
-    js.name .push_back("front_left_wheel_joint");
-    js.name .push_back("rear_left_wheel_joint");
-    js.name .push_back("front_right_wheel_joint");
-    js.name .push_back("rear_right_wheel_joint");
 
-    // double rpm_to_rad = 2*(double)M_PI/60; 
+    js.name.push_back("front_left_wheel_joint");
+    js.name.push_back("rear_left_wheel_joint");
+    js.name.push_back("front_right_wheel_joint");
+    js.name.push_back("rear_right_wheel_joint");
 
-    // double motor_vel_1 = rpm_to_rad*((double)(this->front_left_motor_rpm_))*this->is_motor_reversed_;
-    // double motor_vel_2 = rpm_to_rad*((double)(this->front_right_motor_rpm_))*this->is_motor_reversed_;
-    // double motor_vel_3 = rpm_to_rad*((double)(this->rear_left_motor_rpm_))*this->is_motor_reversed_;
-    // double motor_vel_4 = rpm_to_rad*((double)(this->rear_right_motor_rpm_))*this->is_motor_reversed_;
+    constexpr double ENC_TO_RAD =
+        (2.0 * M_PI) / MOTOR_ENC_CNT;
 
-    double motor_vel_1 = this->front_left_motor_dtheta_*this->is_motor_reversed_;
-    double motor_vel_2 = this->front_right_motor_dtheta_*this->is_motor_reversed_;
-    double motor_vel_3 = this->rear_left_motor_dtheta_*this->is_motor_reversed_;
-    double motor_vel_4 = this->rear_right_motor_dtheta_*this->is_motor_reversed_;
+    const double front_left_pos =
+        static_cast<double>(this->front_left_motor_prev_enc_) *
+        ENC_TO_RAD *
+        this->is_motor_reversed_;
 
+    const double rear_left_pos =
+        static_cast<double>(this->rear_left_motor_prev_enc_) *
+        ENC_TO_RAD *
+        this->is_motor_reversed_;
 
-    js.position.resize(4);
-    js.position .push_back(motor_vel_1);
-    js.position .push_back(motor_vel_2);
-    js.position .push_back(motor_vel_3);
-    js.position .push_back(motor_vel_4);
+    const double front_right_pos =
+        static_cast<double>(this->front_right_motor_prev_enc_) *
+        ENC_TO_RAD *
+        this->is_motor_reversed_;
+
+    const double rear_right_pos =
+        static_cast<double>(this->rear_right_motor_prev_enc_) *
+        ENC_TO_RAD *
+        this->is_motor_reversed_;
+
+    js.position.push_back(front_left_pos);
+    js.position.push_back(rear_left_pos);
+    js.position.push_back(front_right_pos);
+    js.position.push_back(rear_right_pos);
 
     this->joint_state_pubs_->publish(js);
-
-    return;
 }
 
 void MacanumMotorDriver::PublishOdomMsg()
@@ -475,18 +685,30 @@ void MacanumMotorDriver::PublishOdomMsg()
     odom.header.frame_id = "odom";
     odom.child_frame_id = "base_footprint";
 
+    // Position
     odom.pose.pose.position.x = this->x_pos_;
     odom.pose.pose.position.y = this->y_pos_;
+    odom.pose.pose.position.z = 0.0;
 
-    odom.pose.pose.orientation.z = this->w_z_;
+    // Yaw -> Quaternion
+    tf2::Quaternion q;
+    q.setRPY(0.0, 0.0, this->w_z_);
 
+    odom.pose.pose.orientation.x = q.x();
+    odom.pose.pose.orientation.y = q.y();
+    odom.pose.pose.orientation.z = q.z();
+    odom.pose.pose.orientation.w = q.w();
+
+    // Body velocity
     odom.twist.twist.linear.x = this->vbx_;
     odom.twist.twist.linear.y = this->vby_;
+    odom.twist.twist.linear.z = 0.0;
+
+    odom.twist.twist.angular.x = 0.0;
+    odom.twist.twist.angular.y = 0.0;
     odom.twist.twist.angular.z = this->wbz_;
 
     this->odom_pubs_->publish(odom);
-
-    return;
 }
 
 void MacanumMotorDriver::BroadCastOdomMsg()
@@ -520,49 +742,82 @@ void MacanumMotorDriver::BroadCastOdomMsg()
 
 
 //When recved msg, save the queue;
-void MacanumMotorDriver::SubscribeCmdVelMsg(const geometry_msgs::msg::Twist::SharedPtr cmd_vel)
+void MacanumMotorDriver::SubscribeCmdVelMsg(
+    const geometry_msgs::msg::Twist::SharedPtr cmd_vel)
 {
     ArduinoCommand cmd;
 
-    double vbx = cmd_vel->linear.x; //due to i want mm standards
-    double vby = cmd_vel->linear.y; //due to i want mm standards
-    // cmd_vel->linear.z
+    // ROS Twist
+    // linear  : m/s
+    // angular : rad/s
+    const double vbx = cmd_vel->linear.x;
+    const double vby = cmd_vel->linear.y;
+    const double wbz = cmd_vel->angular.z;
 
-    // cmd_vel->angular.x
-    // cmd_vel->angular.y
-    double wbz = cmd_vel->angular.z; //this is rads.
+    // wheel_base_, wheel_seperate_ are full dimensions [mm]
+    // distance from robot center to wheel [m]
+    const double rotation_radius =
+        0.0005 * (this->wheel_base_ + this->wheel_seperate_);
 
-    // //something calculate vel to each wheels
-    double motor_speed_1 = wbz*0.0005*(-this->wheel_base_ - this->wheel_seperate_) + vbx - vby;
+    // Mecanum inverse kinematics
+    // result: wheel linear velocity [m/s]
+    const double motor_speed_1 =
+        vbx - vby - wbz * rotation_radius;
 
-    //actually arduino motor 4 
-    double motor_speed_2 = wbz*0.0005*(this->wheel_base_ + this->wheel_seperate_) + vbx + vby;
+    const double motor_speed_2 =
+        vbx + vby + wbz * rotation_radius;
 
-    double motor_speed_3 = wbz*0.0005*(this->wheel_base_ + this->wheel_seperate_) + vbx - vby;
+    const double motor_speed_3 =
+        vbx - vby + wbz * rotation_radius;
 
-    //actually arduino motor 2
-    double motor_speed_4 = wbz*0.0005*(-this->wheel_base_ - this->wheel_seperate_) + vbx + vby;
+    const double motor_speed_4 =
+        vbx + vby - wbz * rotation_radius;
 
-    double wheel_length = 2*M_PI*this->wheel_radius_/1000.0f; 
+    // wheel circumference [m]
+    const double wheel_length =
+        2.0 * M_PI * this->wheel_radius_ / 1000.0;
 
-    double pwm_data_from_vel = (144.0f)/wheel_length; 
+    // wheel linear velocity [m/s]
+    // -> rev/s
+    // -> RPM
+    const double rpm_from_vel =
+        60.0 / wheel_length;
 
-    int m1s = motor_speed_1*pwm_data_from_vel*this->is_motor_reversed_;
-    int m2s = motor_speed_2*pwm_data_from_vel*this->is_motor_reversed_;    //actually arduino motor 4 
-    int m3s = motor_speed_3*pwm_data_from_vel*this->is_motor_reversed_;
-    int m4s = motor_speed_4*pwm_data_from_vel*this->is_motor_reversed_;    //actually arduino motor 2
+    const float m1_rpm =
+        static_cast<float>(
+            motor_speed_1 *
+            rpm_from_vel *
+            this->is_motor_reversed_);
 
-    // printf("send rpm %d,%d,%d,%d\r\n", m1s,m2s,m3s,m4s);
+    const float m2_rpm =
+        static_cast<float>(
+            motor_speed_2 *
+            rpm_from_vel *
+            this->is_motor_reversed_);
+
+    const float m3_rpm =
+        static_cast<float>(
+            motor_speed_3 *
+            rpm_from_vel *
+            this->is_motor_reversed_);
+
+    const float m4_rpm =
+        static_cast<float>(
+            motor_speed_4 *
+            rpm_from_vel *
+            this->is_motor_reversed_);
 
     cmd.command = 'm';
-    cmd.args.push_back(m1s);//motor 1   
-    cmd.args.push_back(m4s);//motor 2   
-    cmd.args.push_back(m3s);//motor 3   
-    cmd.args.push_back(m2s);//motor 4   
 
-    if(this->motor_Driver_->Write(cmd)<0)
-        printf("motor driver data send failed \r\n");
+    // Arduino motor mapping
+    cmd.args.push_back(m1_rpm); // Arduino motor 1
+    cmd.args.push_back(m4_rpm); // Arduino motor 2
+    cmd.args.push_back(m3_rpm); // Arduino motor 3
+    cmd.args.push_back(m2_rpm); // Arduino motor 4
 
-    return;
+    if(this->motor_Driver_->Write(cmd) < 0)
+    {
+        printf("motor driver data send failed\r\n");
+    }
 }
 

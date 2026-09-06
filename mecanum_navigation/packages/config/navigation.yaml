@@ -28,7 +28,7 @@ bt_navigator:
 
 controller_server:
   ros__parameters:
-    controller_frequency: 20.0  #20.0
+    controller_frequency: 40.0  #20.0
     costmap_update_timeout: 0.30
     min_x_velocity_threshold: 0.001 #0.001
     min_y_velocity_threshold: 0.001 #0.001     #0.5
@@ -55,8 +55,8 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.2  #0.25
-      yaw_goal_tolerance: 0.2  #0.25
+      xy_goal_tolerance: 0.05  #0.25
+      yaw_goal_tolerance: 0.05  #0.25
 
     # DWB parameters
     FollowPath:
@@ -86,8 +86,8 @@ controller_server:
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.1
-      xy_goal_tolerance: 0.2 #0.25
-      yaw_goal_tolerance: 0.2  #0.25
+      xy_goal_tolerance: 0.05 #0.25
+      yaw_goal_tolerance: 0.05  #0.25
       trans_stopped_velocity: 0.05 #0.25
       short_circuit_trajectory_evaluation: false #true
       stateful: true
@@ -437,7 +437,7 @@ waypoint_follower:
 
 velocity_smoother:
   ros__parameters:
-    smoothing_frequency: 20.0 #20.0
+    smoothing_frequency: 40.0 #20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
     # max_velocity: [0.3, 0.3, 2.0]  #0.5 0.0 2.0
