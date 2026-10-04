@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mecanum_gateway</name>
+  <version>0.1.0</version>
+  <description>TCP JSON gateway for mecanum robot status and commands.</description>
+  <maintainer email="george@studio3s.co.kr">Seong Sik, Kim</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>zlib</depend>
+  <depend>nlohmann_json</depend>
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>ros2run</exec_depend>
+  <exec_depend>mecanum_bringup</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
