@@ -34,6 +34,7 @@ private:
   void manual_command(std::uint64_t session, const protocol::Command & command);
   std::unique_ptr<ModeManager> mode_manager_;
   double odom_timeout_, linear_threshold_, angular_threshold_;
+  double map_tf_future_tolerance_, map_tf_stale_timeout_;
   std::mutex snapshot_mutex_;
   Snapshot snapshot_;
   std::unique_ptr<TcpServer> server_;

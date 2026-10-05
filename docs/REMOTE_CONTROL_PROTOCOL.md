@@ -20,6 +20,8 @@ Startup ROS parameters:
 | `port` | `8765` | TCP port |
 | `telemetry_rate` | `10.0` | State publication rate, Hz |
 | `odom_timeout` | `1.0` | Maximum age of valid received odometry, seconds |
+| `map_tf_future_tolerance` | `1.5` | Maximum allowed future offset of latest dynamic map TF, ROS seconds; accommodates AMCL transform_tolerance |
+| `map_tf_stale_timeout` | `1.0` | Maximum age of latest dynamic map TF, ROS seconds; independent of odometry reception timeout |
 | `linear_motion_threshold` | `0.01` | Moving threshold for planar speed, m/s |
 | `angular_motion_threshold` | `0.01` | Moving threshold for absolute yaw rate, rad/s |
 | `map_dir` | `~/mecanum_maps` | Map directory; `~` expands to the gateway user home |
@@ -44,8 +46,11 @@ The gateway subscribes to `/odometry/filtered` (`nav_msgs/msg/Odometry`) and sen
 - `velocity`: odometry vx/vy in m/s and wz in rad/s.
 - `map_pose`: optional map-frame `{x, y, yaw}` for the GUI overlay; the original
   `pose` remains in the odometry message frame. The gateway uses a nonblocking TF
-  lookup from that frame to `map`. Missing TF, stale odometry/dynamic TF, or BASE
-  gives `map_pose:null`. Static TF is timeless. Old clients can ignore this field.
+  latest-TF lookup from that frame to `map`, without requiring TF history at the
+  odometry message timestamp. Dynamic TF age must be within
+  `[-map_tf_future_tolerance, map_tf_stale_timeout]`; future-dated AMCL transforms
+  within this range are valid. Missing TF, stale odometry, TF outside these bounds,
+  or BASE gives `map_pose:null`. Static TF is timeless. Old clients can ignore this field.
 - `base_ready`: valid odometry was received within `odom_timeout`; freshness uses
   monotonic reception time, independently of the TCP connection.
 - `motion_state`: `MOVING` when either speed threshold is exceeded, otherwise

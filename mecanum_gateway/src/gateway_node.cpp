@@ -15,11 +15,17 @@ GatewayNode::GatewayNode(const rclcpp::NodeOptions & options) : Node("gateway_no
   const auto port = declare_parameter<int64_t>("port", 8765);
   const auto rate = declare_parameter<double>("telemetry_rate", 10.0);
   odom_timeout_ = declare_parameter<double>("odom_timeout", 1.0);
+  map_tf_future_tolerance_ = declare_parameter<double>("map_tf_future_tolerance", 1.5);
+  map_tf_stale_timeout_ = declare_parameter<double>("map_tf_stale_timeout", 1.0);
   linear_threshold_ = declare_parameter<double>("linear_motion_threshold", 0.01);
   angular_threshold_ = declare_parameter<double>("angular_motion_threshold", 0.01);
   if (port < 1 || port > 65535) throw std::invalid_argument("port must be between 1 and 65535");
   if (!std::isfinite(rate) || rate <= 0.0) throw std::invalid_argument("telemetry_rate must be finite and positive");
   if (!std::isfinite(odom_timeout_) || odom_timeout_ <= 0.0) throw std::invalid_argument("odom_timeout must be finite and positive");
+  if (!std::isfinite(map_tf_future_tolerance_) || map_tf_future_tolerance_ < 0.0)
+    throw std::invalid_argument("map_tf_future_tolerance must be finite and nonnegative");
+  if (!std::isfinite(map_tf_stale_timeout_) || map_tf_stale_timeout_ <= 0.0)
+    throw std::invalid_argument("map_tf_stale_timeout must be finite and positive");
   if (!std::isfinite(linear_threshold_) || linear_threshold_ < 0.0 ||
       !std::isfinite(angular_threshold_) || angular_threshold_ < 0.0) {
     throw std::invalid_argument("motion thresholds must be finite and nonnegative");
@@ -167,9 +173,12 @@ void GatewayNode::tick() {
       auto transform = tf_buffer_->lookupTransform("map", sample.frame_id, tf2::TimePointZero);
       const auto & t = transform.transform;
       const double age = (now() - rclcpp::Time(transform.header.stamp)).seconds();
-      // Zero-stamped static transforms are timeless; dynamic transforms must be recent.
+      // Latest lookup also works before TF has history spanning the odometry stamp.
+      // AMCL future-dates map->odom by transform_tolerance. These ROS-time bounds
+      // are independent of odometry's steady-clock reception timeout.
+      // Zero-stamped static transforms are timeless.
       if ((transform.header.stamp.sec == 0 && transform.header.stamp.nanosec == 0) ||
-          (age >= -0.1 && age <= odom_timeout_)) {
+          (age >= -map_tf_future_tolerance_ && age <= map_tf_stale_timeout_)) {
         tf2::Transform mapping(tf2::Quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w),
           tf2::Vector3(t.translation.x, t.translation.y, t.translation.z));
         tf2::Quaternion body; body.setRPY(0, 0, sample.yaw);
