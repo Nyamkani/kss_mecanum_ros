@@ -3,6 +3,8 @@ project(mecanum_gateway)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(nav2_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -14,6 +16,7 @@ find_package(Threads REQUIRED)
 add_executable(gateway_node
   src/main.cpp
   src/gateway_node.cpp
+  src/navigation_client.cpp
   src/tcp_server.cpp
   src/map_stream.cpp
   src/mode_manager.cpp
@@ -23,7 +26,7 @@ target_compile_features(gateway_node PRIVATE cxx_std_17)
 set_target_properties(gateway_node PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_options(gateway_node PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(gateway_node PRIVATE include)
-ament_target_dependencies(gateway_node rclcpp nav_msgs geometry_msgs tf2 tf2_ros)
+ament_target_dependencies(gateway_node rclcpp rclcpp_action nav2_msgs nav_msgs geometry_msgs tf2 tf2_ros)
 target_link_libraries(gateway_node nlohmann_json::nlohmann_json Threads::Threads ZLIB::ZLIB)
 
 install(TARGETS gateway_node DESTINATION lib/${PROJECT_NAME})

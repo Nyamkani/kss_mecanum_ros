@@ -45,6 +45,18 @@ class MapTests(unittest.TestCase):
         self.assertGreater(x2, x)
         self.assertAlmostEqual(y2, y)
 
+    def test_pixel_world_round_trip(self):
+        for yaw in (0.0, 0.73, -1.4, math.pi / 2):
+            packet = self.packet()
+            packet['origin'].update(qz=math.sin(yaw / 2), qw=math.cos(yaw / 2))
+            view = SimpleNamespace(map=decode_map(packet), offset_x=37., offset_y=19.,
+                                   scale_x=2.3, scale_y=1.7)
+            for pixel in ((37., 19.), (39., 21.), (41.6, 22.4)):
+                world = MapView.canvas_to_world(view, *pixel)
+                actual = MapView.world_to_canvas(view, *world)
+                for a, b in zip(actual, pixel):
+                    self.assertAlmostEqual(a, b)
+
 
 if __name__ == '__main__':
     unittest.main()

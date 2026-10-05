@@ -62,4 +62,30 @@ occupied는 검정이며 중간 점유 값은 grayscale입니다. 이미지 Y축
 연결이 끊기면 overlay를 숨깁니다. 원본 지도 metadata는 유지됩니다.
 
 현재 지원 범위는 연결, robot_state, Mapping/Navigation 모드, map 저장, 지도 표시 및 Mapping
-수동 주행입니다. Navigation goal과 Supervisor는 포함하지 않습니다.
+수동 주행, Navigation goal 및 Initial Pose입니다. Supervisor는 포함하지 않습니다.
+
+## Navigation goal
+
+NAVIGATION에서 지도 위 왼쪽 버튼을 누르면 위치를 선택하고, 드래그하면 방향을 지정합니다.
+놓으면 주황색 원/방향선과 Goal X/Y/Yaw가 표시됩니다. 짧은 클릭은 현재 map_pose yaw,
+없으면 이전 goal yaw를 사용합니다(둘 다 없을 때만 0). 지도 바깥 여백 클릭은 무시합니다.
+
+선택만으로 이동하지 않습니다. **Send Goal**을 눌러야 전송합니다. Navigation 상태에
+PENDING → EXECUTING → SUCCEEDED/ABORTED/CANCELED 또는 REJECTED가 표시됩니다.
+Send Goal 응답의 성공은 목표 수락이며 도착을 뜻하지 않습니다. 실행 중 새 goal은 Gateway가
+거부합니다. Cancel Goal은 실행 중 취소를 요청하고, 최종 CANCELED는 telemetry로 확인합니다.
+BASE/MAPPING 및 연결 끊김에서는 goal 조작과 전송/취소가 비활성화됩니다.
+Supervisor는 포함하지 않습니다.
+
+
+## AMCL Initial Pose
+
+NAVIGATION에서 **Select Initial Pose**를 누른 뒤 지도를 press-drag-release하여 초기
+위치와 방향 후보를 선택합니다. 보라색 사각형/방향선이 후보이며 파란 로봇 위치 및 주황색
+Goal과 구분됩니다. **Apply Initial Pose**를 눌러야 전송합니다. 성공 응답은 발행 확인이며
+AMCL 수렴을 뜻하지 않습니다. 이후 로봇의 map_pose 갱신을 확인하세요.
+
+**Select Goal**을 누르면 Goal 선택으로 돌아갑니다. 두 후보는 독립적으로 유지되고,
+현재 선택 모드는 지도 아래에 표시됩니다. 짧은 클릭의 초기 방향은 현재 로봇 map yaw,
+없으면 이전 Initial Pose 후보 yaw, 둘 다 없으면 0입니다. BASE/MAPPING 또는 연결 끊김에서는
+선택 버튼과 Apply가 비활성화됩니다. 기존 지도 좌표 변환을 그대로 사용합니다.

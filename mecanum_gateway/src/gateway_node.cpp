@@ -38,7 +38,18 @@ GatewayNode::GatewayNode(const rclcpp::NodeOptions & options) : Node("gateway_no
   manual_timeout_ = declare_parameter<double>("manual_cmd_timeout", 0.30);
   for (double value : {max_manual_linear_, max_manual_angular_, manual_timeout_})
     if (!std::isfinite(value) || value <= 0) throw std::invalid_argument("manual limits/timeouts must be finite and positive");
+  const double xy_stddev = declare_parameter<double>("initial_pose_xy_stddev", 0.25);
+  const double yaw_stddev = declare_parameter<double>("initial_pose_yaw_stddev", 0.261799);
+  for (double value : {xy_stddev, yaw_stddev})
+    if (!std::isfinite(value) || value <= 0 || !std::isfinite(value * value) || value * value == 0)
+      throw std::invalid_argument("initial pose stddev must be positive with finite nonzero variance");
+  initial_pose_xy_variance_ = xy_stddev * xy_stddev;
+  initial_pose_yaw_variance_ = yaw_stddev * yaw_stddev;
+  initial_pose_publisher_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/initialpose", 10);
   server_ = std::make_unique<TcpServer>(address, static_cast<int>(port));
+  navigation_ = std::make_unique<NavigationClient>(this, [this](std::uint64_t session, std::string reply) {
+    server_->send_result(session, std::move(reply));
+  });
   velocity_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
   manual_timer_ = create_wall_timer(std::chrono::milliseconds(20),
     std::bind(&GatewayNode::check_manual_timeout, this));
@@ -66,6 +77,7 @@ void GatewayNode::Shutdown() {
     zero_manual(mode_manager_ && mode_manager_->GetMode() == "MAPPING");
     velocity_publisher_->wait_for_all_acked(std::chrono::milliseconds(100));
   }
+  if (navigation_) navigation_->Reset();
   if (map_stream_) map_stream_->Stop();
   if (server_) server_->stop();
   mode_manager_.reset();
@@ -108,6 +120,33 @@ void GatewayNode::manual_command(std::uint64_t session, const protocol::Command 
   if (manual_active_) { last_manual_ = std::chrono::steady_clock::now(); manual_session_ = session; }
   reply(true, "manual velocity applied");
 }
+void GatewayNode::initial_pose_command(std::uint64_t session, const protocol::Command & command) {
+  auto reply = [&](bool success, const std::string & message) {
+    server_->send_result(session, protocol::command_result(command, success, message));
+  };
+  if (mode_manager_->GetMode() != "NAVIGATION" || mode_manager_->IsStopping()) {
+    reply(false, "initial pose is only allowed in NAVIGATION mode"); return;
+  }
+  if (session != server_->active_session()) { reply(false, "control client disconnected"); return; }
+  for (const auto * value : {&command.x, &command.y, &command.yaw}) {
+    if (!value->is_number() || !std::isfinite(value->get<double>())) {
+      reply(false, "x, y and yaw must be finite numbers"); return;
+    }
+  }
+  geometry_msgs::msg::PoseWithCovarianceStamped message;
+  message.header.frame_id = "map";
+  message.header.stamp = now();
+  message.pose.pose.position.x = command.x.get<double>();
+  message.pose.pose.position.y = command.y.get<double>();
+  const double yaw = std::remainder(command.yaw.get<double>(), 2.0 * std::acos(-1.0));
+  message.pose.pose.orientation.z = std::sin(yaw / 2.0);
+  message.pose.pose.orientation.w = std::cos(yaw / 2.0);
+  message.pose.covariance[0] = initial_pose_xy_variance_;
+  message.pose.covariance[7] = initial_pose_xy_variance_;
+  message.pose.covariance[35] = initial_pose_yaw_variance_;
+  initial_pose_publisher_->publish(message);
+  reply(true, "initial pose published");
+}
 void GatewayNode::on_odometry(const nav_msgs::msg::Odometry & message) {
   const auto & p = message.pose.pose.position;
   const auto & q = message.pose.pose.orientation;
@@ -134,14 +173,22 @@ void GatewayNode::tick() {
   for (const auto & reply : mode_manager_->Update()) {
     server_->send_result(reply.session, protocol::command_result(reply.command, reply.success, reply.message));
   }
+  if (mode_manager_->GetMode() != "NAVIGATION") navigation_->Reset();
   TcpServer::CommandFrame command;
   for (int i = 0; i < 128 && server_->take_command(command); ++i) {
     const auto parsed = protocol::parse_command(command.frame);
     if (!parsed.error.empty() || parsed.name == "get_status") {
       server_->send_result(command.session, protocol::command_result(parsed));
+    } else if (parsed.name == "navigation_goal" || parsed.name == "cancel_navigation_goal") {
+      if (command.session != server_->active_session()) continue;
+      navigation_->Command(command.session, parsed,
+        mode_manager_->GetMode() == "NAVIGATION" && !mode_manager_->IsStopping());
+    } else if (parsed.name == "set_initial_pose") {
+      initial_pose_command(command.session, parsed);
     } else if (parsed.name == "manual_velocity") {
       manual_command(command.session, parsed);
     } else {
+      if (parsed.name == "stop_mode" && mode_manager_->GetMode() == "NAVIGATION") navigation_->Reset();
       if (parsed.name == "stop_mode" && mode_manager_->GetMode() == "MAPPING") zero_manual(true);
       if (auto reply = mode_manager_->Handle(command.session, parsed))
         server_->send_result(reply->session, protocol::command_result(reply->command, reply->success, reply->message));
@@ -155,6 +202,7 @@ void GatewayNode::tick() {
   protocol::RobotState state;
   state.timestamp = now().seconds();
   state.mode = mode_manager_->GetMode();
+  state.navigation_state = navigation_->State();
   map_stream_->SetEnabled(state.mode != "BASE");
   check_manual_timeout();
   state.x = sample.x; state.y = sample.y; state.yaw = sample.yaw;

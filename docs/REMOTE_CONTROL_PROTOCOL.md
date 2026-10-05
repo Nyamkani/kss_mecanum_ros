@@ -28,6 +28,8 @@ Startup ROS parameters:
 | `map_save_timeout` | `30.0` | Map saver deadline in seconds before termination |
 | `max_manual_linear_mps` | `0.30` | Symmetric clamp for each of vx/vy, m/s |
 | `max_manual_angular_rps` | `1.00` | Symmetric clamp for wz, rad/s |
+| `initial_pose_xy_stddev` | `0.25` | Initial position standard deviation, meters |
+| `initial_pose_yaw_stddev` | `0.261799` | Initial heading standard deviation, radians |
 | `manual_cmd_timeout` | `0.30` | Nonzero manual command deadline, steady seconds |
 
 Example: `ros2 run mecanum_gateway gateway_node --ros-args -p bind_address:=127.0.0.1 -p port:=8766`
@@ -207,3 +209,65 @@ are limited to 1,048,576 cells and clients allow up to 2 MiB per incoming frame.
 The send path keeps one latest pending map rather than map history. Commands and
 telemetry are queued ahead of a new map, but cannot interrupt an in-flight map
 frame; a slow link may therefore trigger the client's telemetry timeout.
+
+## Navigation goals
+
+`robot_state.navigation_state` is one of `IDLE`, `PENDING`, `EXECUTING`,
+`SUCCEEDED`, `ABORTED`, `CANCELED`, `REJECTED`. It is included in the existing
+10 Hz telemetry. `pose` and optional `map_pose` retain their existing meanings.
+
+In NAVIGATION only, submit a destination in map coordinates (meters, radians):
+
+```json
+{"command":"navigation_goal","request_id":100,"x":1.25,"y":-0.80,"yaw":1.57}
+{"type":"command_result","request_id":100,"command":"navigation_goal","success":true,"message":"navigation goal accepted"}
+```
+
+x/y/yaw must be finite numbers, not strings, booleans or null. Yaw is normalized.
+The result acknowledges acceptance, not arrival. A rejected request returns
+`success:false`; server rejection sets `REJECTED`. Unavailable service returns
+`navigation action server unavailable`. While PENDING or EXECUTING, another goal
+is rejected with `navigation goal already active`. Terminal states allow a new goal.
+
+```json
+{"command":"cancel_navigation_goal","request_id":101}
+{"type":"command_result","request_id":101,"command":"cancel_navigation_goal","success":true,"message":"navigation cancel accepted"}
+```
+
+Cancel requires NAVIGATION and an accepted active goal. Success means the cancel
+request was accepted; only the final result sets `CANCELED`. No active goal yields
+`success:false`, `message:"no active navigation goal"`.
+
+Mode stop requests cancellation before process termination and resets state to
+IDLE. Pending goal/cancel commands receive a failure response when the mode ends.
+Late action callbacks cannot restore a previous mode's state. Gateway
+shutdown requests cancellation without waiting for the action server. TCP client
+disconnection alone does not cancel navigation; a reconnect observes current state.
+
+Implementation reference: Gateway adapts these neutral commands to an asynchronous
+`/navigate_to_pose` action client, using the map frame and its current ROS timestamp.
+No ROS message types or frame fields are required in external commands.
+
+
+## Initial pose
+
+In NAVIGATION only, apply an initial localization estimate in map coordinates
+(meters, radians). The external command contains no middleware-specific types or topics.
+
+```json
+{"command":"set_initial_pose","request_id":200,"x":1.2,"y":-0.4,"yaw":1.57}
+{"type":"command_result","request_id":200,"command":"set_initial_pose","success":true,"message":"initial pose published"}
+```
+
+All three fields must be finite JSON numbers; booleans, strings, null, missing
+values and non-finite values are rejected. Yaw is normalized to [-pi, pi].
+BASE/MAPPING (and mode stopping) returns `success:false` with
+`initial pose is only allowed in NAVIGATION mode`.
+Success acknowledges publication only, not localization convergence. Observe
+subsequent `robot_state.map_pose` for the localization estimate.
+
+Implementation reference: Gateway publishes a `PoseWithCovarianceStamped` on
+`/initialpose`, with map frame and current ROS timestamp. Covariance indices 0 and
+7 contain `initial_pose_xy_stddev²`; index 35 contains `initial_pose_yaw_stddev²`.
+All other entries are zero. These startup parameters must be positive and their
+squares finite and nonzero. The operation does not change the active navigation goal.

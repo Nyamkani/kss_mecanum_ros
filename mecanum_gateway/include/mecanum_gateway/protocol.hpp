@@ -9,6 +9,7 @@ struct Command {
   nlohmann::json request_id = nullptr;
   nlohmann::json map_name = nullptr;
   nlohmann::json vx = nullptr, vy = nullptr, wz = nullptr;
+  nlohmann::json x = nullptr, y = nullptr, yaw = nullptr;
   std::string error;
 };
 struct RobotState {
@@ -19,6 +20,7 @@ struct RobotState {
   double vx = 0.0, vy = 0.0, wz = 0.0;
   nlohmann::json map_pose = nullptr;
   std::string motion_state = "UNKNOWN";
+  std::string navigation_state = "IDLE";
   std::string error;
 };
 Command parse_command(const std::string & frame);

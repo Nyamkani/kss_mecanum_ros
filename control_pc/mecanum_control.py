@@ -22,6 +22,7 @@ class MecanumControl:
         self.client = client or RobotClient()
         self.pending = {}
         self.mode = None
+        self.navigation_state = "IDLE"
         self._drive = None
         self._drive_after = None
         self._map_pose = None
@@ -37,7 +38,7 @@ class MecanumControl:
         self.port = tk.StringVar(value=str(DEFAULT_PORT))
         self.map_name = tk.StringVar(value='room_01')
         self.values = {key: tk.StringVar(value='—') for key in
-                       ('base_ready', 'mode', 'x', 'y', 'yaw', 'vx', 'vy', 'wz', 'motion', 'error')}
+                       ('base_ready', 'mode', 'x', 'y', 'yaw', 'vx', 'vy', 'wz', 'motion', 'error', 'navigation')}
         self.connection = tk.StringVar(value='DISCONNECTED')
         self.freshness = tk.StringVar(value='No robot_state received')
         outer = ttk.Frame(root, padding=16)
@@ -123,6 +124,23 @@ class MecanumControl:
         ttk.Label(outer, text='Recent commands and connection events').grid(row=5, column=0, sticky='w')
         self.log = ScrolledText(outer, height=10, state='disabled', wrap='word')
         self.log.grid(row=6, column=0, sticky='nsew', pady=(5, 0))
+        nav = ttk.Frame(self.map_view)
+        nav.grid(row=6, column=0, sticky='ew', pady=8)
+        ttk.Label(nav, text='Navigation:').grid(row=0, column=0)
+        ttk.Label(nav, textvariable=self.values['navigation']).grid(row=0, column=1)
+        self.selection_buttons = {}
+        for col, (kind, label) in enumerate((('initial_pose', 'Select Initial Pose'), ('goal', 'Select Goal'))):
+            button = ttk.Button(nav, text=label, command=lambda k=kind: self.map_view.select_kind(k))
+            button.grid(row=1, column=col, padx=4, pady=6)
+            self.selection_buttons[kind] = button
+        self.buttons['set_initial_pose'] = ttk.Button(nav, text='Apply Initial Pose',
+                                                     command=lambda: self.send('set_initial_pose'))
+        self.buttons['set_initial_pose'].grid(row=2, column=0, padx=4, pady=6)
+        for col, (command, label) in enumerate((('navigation_goal', 'Send Goal'),
+                                               ('cancel_navigation_goal', 'Cancel Goal'))):
+            self.buttons[command] = ttk.Button(nav, text=label, command=lambda c=command: self.send(c))
+            self.buttons[command].grid(row=3, column=col, padx=4, pady=6)
+        self.map_view.on_goal_changed = self._update_buttons
         self._update_buttons()
         self._after = root.after(UI_INTERVAL_MS, self._poll)
 
@@ -220,6 +238,10 @@ class MecanumControl:
         if command == "stop_mode":
             self._end_drive(force=True)
         fields = {}
+        if command == "navigation_goal":
+            fields.update(self.map_view.goal)
+        elif command == "set_initial_pose":
+            fields.update(self.map_view.initial_pose)
         if command in ('save_map', 'start_navigation'):
             name = self.map_name.get().strip()
             if not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', name) or name in ('.', '..'):
@@ -239,6 +261,8 @@ class MecanumControl:
         if packet['type'] == 'robot_state':
             self._had_state = True
             self.mode = packet['mode']
+            self.navigation_state = packet.get('navigation_state', 'IDLE')
+            self.values['navigation'].set(self.navigation_state)
             self._map_pose = packet.get('map_pose')
             self.values['mode'].set(self.mode)
             self.values['base_ready'].set('YES' if packet['base_ready'] else 'NO')
@@ -276,6 +300,17 @@ class MecanumControl:
         allowed = {'BASE': {'start_mapping', 'start_navigation'},
                    'MAPPING': {'stop_mode', 'save_map'}, 'NAVIGATION': {'stop_mode'}}.get(self.mode, set())
         busy = set(self.pending.values())
+        nav_allowed = connected and self.mode == 'NAVIGATION' and 'stop_mode' not in busy
+        self.map_view.enable_goal(nav_allowed)
+        for button in self.selection_buttons.values():
+            button.configure(state="normal" if nav_allowed else "disabled")
+        allowed = set(allowed)
+        if nav_allowed and self.map_view.initial_pose is not None:
+            allowed.add('set_initial_pose')
+        if nav_allowed and self.map_view.goal is not None:
+            allowed.add('navigation_goal')
+        if nav_allowed and self.navigation_state in ('EXECUTING', 'ACCEPTED'):
+            allowed.add('cancel_navigation_goal')
         for command, button in self.buttons.items():
             enabled = connected and command in allowed and command not in busy
             if busy & {'start_mapping', 'start_navigation', 'stop_mode'}:

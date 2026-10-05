@@ -53,6 +53,12 @@ class MapView(ttk.LabelFrame):
         self.pose_info = tk.StringVar(value='Robot overlay unavailable: waiting for map_pose / TF')
         ttk.Label(self, textvariable=self.info, wraplength=450).grid(row=1, column=0, sticky='w')
         ttk.Label(self, textvariable=self.pose_info, wraplength=450).grid(row=2, column=0, sticky='w')
+        self.goal = None
+        self.initial_pose = None
+        self.selection_kind = "goal"
+        self._goal_drag = None
+        self.goal_enabled = False
+        self.on_goal_changed = lambda: None
         self.map = None
         self.pose = None
         self.image = None
@@ -60,6 +66,15 @@ class MapView(ttk.LabelFrame):
         self.offset_x = self.offset_y = 0.0
         self._resize_job = None
         self.canvas.bind('<Configure>', self._resize)
+        self.canvas.bind('<ButtonPress-1>', self._goal_press)
+        self.canvas.bind('<B1-Motion>', self._goal_motion)
+        self.canvas.bind('<ButtonRelease-1>', self._goal_release)
+        self.goal_info = tk.StringVar(value='Goal: not selected')
+        ttk.Label(self, textvariable=self.goal_info).grid(row=3, column=0, sticky='w')
+        self.initial_pose_info = tk.StringVar(value='Initial Pose: not selected')
+        ttk.Label(self, textvariable=self.initial_pose_info).grid(row=4, column=0, sticky='w')
+        self.selection_info = tk.StringVar(value='Selecting: Goal (orange)')
+        ttk.Label(self, textvariable=self.selection_info).grid(row=5, column=0, sticky='w')
 
     def _resize(self, _event):
         if self._resize_job is not None:
@@ -71,6 +86,12 @@ class MapView(ttk.LabelFrame):
         self.render()
 
     def clear(self):
+        self.initial_pose = None
+        self.initial_pose_info.set("Initial Pose: not selected")
+        self.select_kind("goal")
+        self.goal = None
+        self._goal_drag = None
+        self.goal_info.set("Goal: not selected")
         self.map = None
         self.pose = None
         self.image = None
@@ -107,6 +128,7 @@ class MapView(ttk.LabelFrame):
         self.canvas.tag_lower('map')
         self.info.set(f"Map #{m['sequence']} · {width} × {height} · {m['resolution']:.3f} m/cell")
         self.set_pose(self.pose)
+        self._draw_goal()
 
     def world_to_canvas(self, x, y):
         m = self.map
@@ -136,3 +158,82 @@ class MapView(ttk.LabelFrame):
         self.canvas.create_oval(x-4, y-4, x+4, y+4, fill='#1673dd', outline='white', tags='robot')
         self.canvas.create_line(x, y, hx, hy, fill='#1673dd', width=2, arrow='last', tags='robot')
         self.pose_info.set('Robot pose in map frame (TF transformed)')
+
+    def canvas_to_world(self, x, y):
+        m = self.map
+        origin = m['origin']
+        norm = math.hypot(origin['qz'], origin['qw'])
+        qz, qw = origin['qz'] / norm, origin['qw'] / norm
+        yaw = math.atan2(2 * qw * qz, 1 - 2 * qz * qz)
+        local_x = (x - self.offset_x) / self.scale_x * m['resolution']
+        local_y = (m['height'] - (y - self.offset_y) / self.scale_y) * m['resolution']
+        return (origin['x'] + math.cos(yaw) * local_x - math.sin(yaw) * local_y,
+                origin['y'] + math.sin(yaw) * local_x + math.cos(yaw) * local_y)
+
+    def enable_goal(self, enabled):
+        self.goal_enabled = enabled
+        if not enabled and self._goal_drag is not None:
+            self._goal_drag = None
+            self._draw_goal()
+
+    def select_kind(self, kind):
+        if kind not in ('goal', 'initial_pose'):
+            raise ValueError('unknown selection kind')
+        self._goal_drag = None
+        self.selection_kind = kind
+        self.selection_info.set('Selecting: Goal (orange)' if kind == 'goal'
+                                else 'Selecting: Initial Pose (purple)')
+        self._draw_goal()
+
+    def _goal_press(self, event):
+        if not self.goal_enabled or self.map is None:
+            return
+        if not (self.offset_x <= event.x <= self.offset_x + self.map['width'] * self.scale_x
+                and self.offset_y <= event.y <= self.offset_y + self.map['height'] * self.scale_y):
+            return
+        x, y = self.canvas_to_world(event.x, event.y)
+        previous = self.goal if self.selection_kind == 'goal' else self.initial_pose
+        yaw = self.pose['yaw'] if self.pose is not None else previous['yaw'] if previous else 0.0
+        self._goal_drag = dict(x=x, y=y, yaw=yaw)
+        self._draw_goal()
+
+    def _goal_motion(self, event):
+        if not self.goal_enabled or self._goal_drag is None:
+            return
+        goal = self._goal_drag
+        px, py = self.world_to_canvas(goal['x'], goal['y'])
+        if math.hypot(event.x - px, event.y - py) >= 5.0:
+            x, y = self.canvas_to_world(event.x, event.y)
+            goal['yaw'] = math.atan2(y - goal['y'], x - goal['x'])
+        self._draw_goal()
+
+    def _goal_release(self, event):
+        if not self.goal_enabled or self._goal_drag is None:
+            return
+        self._goal_motion(event)
+        if self.selection_kind == "goal":
+            self.goal = self._goal_drag
+        else:
+            self.initial_pose = self._goal_drag
+        self._goal_drag = None
+        self._draw_goal()
+        self.on_goal_changed()
+
+    def _draw_goal(self):
+        for kind, candidate, color, label, info in (
+                ('goal', self.goal, '#d05000', 'Goal', self.goal_info),
+                ('initial_pose', self.initial_pose, '#8b35c9', 'Initial Pose', self.initial_pose_info)):
+            self.canvas.delete(kind)
+            pose = self._goal_drag if self.selection_kind == kind and self._goal_drag else candidate
+            if pose is None or self.map is None:
+                info.set(f'{label}: not selected')
+                continue
+            x, y = self.world_to_canvas(pose['x'], pose['y'])
+            hx, hy = self.world_to_canvas(pose['x'] + math.cos(pose['yaw']), pose['y'] + math.sin(pose['yaw']))
+            length = math.hypot(hx - x, hy - y)
+            if length:
+                hx, hy = x + 25 * (hx - x) / length, y + 25 * (hy - y) / length
+            marker = self.canvas.create_rectangle if kind == 'initial_pose' else self.canvas.create_oval
+            marker(x-6, y-6, x+6, y+6, outline=color, width=2, tags=kind)
+            self.canvas.create_line(x, y, hx, hy, fill=color, width=3, arrow='last', tags=kind)
+            info.set(f"{label} X {pose['x']:.3f} m   Y {pose['y']:.3f} m   Yaw {pose['yaw']:.3f} rad")

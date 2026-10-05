@@ -7,9 +7,11 @@
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include "mecanum_gateway/map_stream.hpp"
+#include "mecanum_gateway/navigation_client.hpp"
 #include "mecanum_gateway/protocol.hpp"
 #include "mecanum_gateway/mode_manager.hpp"
 #include "mecanum_gateway/tcp_server.hpp"
@@ -31,9 +33,13 @@ private:
   void tick();
   void check_manual_timeout();
   void zero_manual(bool force = false);
+  void initial_pose_command(std::uint64_t session, const protocol::Command & command);
   void manual_command(std::uint64_t session, const protocol::Command & command);
   std::unique_ptr<ModeManager> mode_manager_;
+  std::unique_ptr<NavigationClient> navigation_;
   double odom_timeout_, linear_threshold_, angular_threshold_;
+  double initial_pose_xy_variance_, initial_pose_yaw_variance_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_publisher_;
   double map_tf_future_tolerance_, map_tf_stale_timeout_;
   std::mutex snapshot_mutex_;
   Snapshot snapshot_;

@@ -10,6 +10,9 @@ Command parse_command(const std::string & frame) {
       result.error = "command must be a JSON object";
       return result;
     }
+    result.x = value.value("x", json(nullptr));
+    result.y = value.value("y", json(nullptr));
+    result.yaw = value.value("yaw", json(nullptr));
     result.vx = value.value("vx", json(nullptr));
     result.vy = value.value("vy", json(nullptr));
     result.wz = value.value("wz", json(nullptr));
@@ -46,7 +49,7 @@ std::string robot_state(const RobotState & s) {
   return json({{"type", "robot_state"}, {"timestamp", s.timestamp}, {"mode", s.mode},
     {"base_ready", s.base_ready}, {"pose", {{"x", s.x}, {"y", s.y}, {"yaw", s.yaw}}},
     {"velocity", {{"vx", s.vx}, {"vy", s.vy}, {"wz", s.wz}}},
-    {"map_pose", s.map_pose}, {"motion_state", s.motion_state}, {"error", s.error}
+    {"navigation_state", s.navigation_state}, {"map_pose", s.map_pose}, {"motion_state", s.motion_state}, {"error", s.error}
   }).dump(-1, ' ', true, json::error_handler_t::replace) + '\n';
 }
 std::string map_packet(std::uint64_t sequence, double resolution, std::uint32_t width,
